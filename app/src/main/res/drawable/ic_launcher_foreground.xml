@@ -1,0 +1,21 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Neon green speedometer icon -->
+    <path
+        android:fillColor="#39FF14"
+        android:pathData="M54,24
+                   A30,30 0 1,1 54,84
+                   A30,30 0 1,1 54,24
+                   M54,30
+                   A24,24 0 1,0 54,78
+                   A24,24 0 1,0 54,30
+                   M54,40 L54,54 L68,54"/>
+    <path
+        android:fillColor="#39FF14"
+        android:strokeWidth="4"
+        android:strokeColor="#39FF14"
+        android:pathData="M54,54 L68,40"/>
+</vector>
