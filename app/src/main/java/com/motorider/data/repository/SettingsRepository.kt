@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -16,6 +17,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -32,11 +35,24 @@ class SettingsRepository @Inject constructor(
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    data class RadioStation(
+        val id: String,
+        val name: String,
+        val url: String
+    )
+
     private object PreferencesKeys {
         val SPEED_LIMIT_KMH = doublePreferencesKey("speed_limit_kmh")
         val HAPTIC_ENABLED = booleanPreferencesKey("haptic_enabled")
-        val AUTO_RECORD_ENABLED = booleanPreferencesKey("auto_record_enabled")
         val USE_MPH = booleanPreferencesKey("use_mph")
+
+        val OVERLAY_ENABLED = booleanPreferencesKey("overlay_enabled")
+        val OVERLAY_X = doublePreferencesKey("overlay_x")
+        val OVERLAY_Y = doublePreferencesKey("overlay_y")
+        val OVERLAY_WIDTH = doublePreferencesKey("overlay_width")
+        val OVERLAY_HEIGHT = doublePreferencesKey("overlay_height")
+        val RADIO_STATIONS_JSON = stringPreferencesKey("radio_stations_json")
+        val SELECTED_STATION_ID = stringPreferencesKey("selected_station_id")
     }
 
     // Default 120 km/h
@@ -52,11 +68,6 @@ class SettingsRepository @Inject constructor(
         }
         .stateIn(scope, SharingStarted.Eagerly, true)
 
-    val autoRecordEnabled: StateFlow<Boolean> = context.dataStore.data
-        .map { preferences ->
-            preferences[PreferencesKeys.AUTO_RECORD_ENABLED] ?: true
-        }
-        .stateIn(scope, SharingStarted.Eagerly, true)
 
     // Use mph instead of km/h
     val useMph: StateFlow<Boolean> = context.dataStore.data
@@ -64,6 +75,49 @@ class SettingsRepository @Inject constructor(
             preferences[PreferencesKeys.USE_MPH] ?: false
         }
         .stateIn(scope, SharingStarted.Eagerly, false)
+
+    val overlayEnabled: StateFlow<Boolean> = context.dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.OVERLAY_ENABLED] ?: false
+        }
+        .stateIn(scope, SharingStarted.Eagerly, false)
+
+    val overlayX: StateFlow<Double> = context.dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.OVERLAY_X] ?: 20.0
+        }
+        .stateIn(scope, SharingStarted.Eagerly, 20.0)
+
+    val overlayY: StateFlow<Double> = context.dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.OVERLAY_Y] ?: 200.0
+        }
+        .stateIn(scope, SharingStarted.Eagerly, 200.0)
+
+    val overlayWidth: StateFlow<Double> = context.dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.OVERLAY_WIDTH] ?: 200.0
+        }
+        .stateIn(scope, SharingStarted.Eagerly, 200.0)
+
+    val overlayHeight: StateFlow<Double> = context.dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.OVERLAY_HEIGHT] ?: 150.0
+        }
+        .stateIn(scope, SharingStarted.Eagerly, 150.0)
+
+    val radioStations: StateFlow<List<RadioStation>> = context.dataStore.data
+        .map { preferences ->
+            val raw = preferences[PreferencesKeys.RADIO_STATIONS_JSON]
+            decodeStations(raw)
+        }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    val selectedStationId: StateFlow<String?> = context.dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.SELECTED_STATION_ID]
+        }
+        .stateIn(scope, SharingStarted.Eagerly, null)
 
     fun setSpeedLimit(limit: Double) {
         scope.launch {
@@ -81,13 +135,6 @@ class SettingsRepository @Inject constructor(
         }
     }
 
-    fun setAutoRecordEnabled(enabled: Boolean) {
-        scope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[PreferencesKeys.AUTO_RECORD_ENABLED] = enabled
-            }
-        }
-    }
 
     fun setUseMph(useMph: Boolean) {
         scope.launch {
@@ -95,5 +142,108 @@ class SettingsRepository @Inject constructor(
                 preferences[PreferencesKeys.USE_MPH] = useMph
             }
         }
+    }
+
+    fun setOverlayEnabled(enabled: Boolean) {
+        scope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[PreferencesKeys.OVERLAY_ENABLED] = enabled
+            }
+        }
+    }
+
+    fun setOverlayBounds(x: Double, y: Double, width: Double, height: Double) {
+        scope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[PreferencesKeys.OVERLAY_X] = x
+                preferences[PreferencesKeys.OVERLAY_Y] = y
+                preferences[PreferencesKeys.OVERLAY_WIDTH] = width
+                preferences[PreferencesKeys.OVERLAY_HEIGHT] = height
+            }
+        }
+    }
+
+    fun upsertStation(name: String, url: String, id: String = url) {
+        scope.launch {
+            context.dataStore.edit { preferences ->
+                val existing = decodeStations(preferences[PreferencesKeys.RADIO_STATIONS_JSON])
+                val updated = existing.toMutableList()
+                val idx = updated.indexOfFirst { it.id == id }
+                val station = RadioStation(id = id, name = name.trim(), url = url.trim())
+                if (idx >= 0) updated[idx] = station else updated.add(station)
+                preferences[PreferencesKeys.RADIO_STATIONS_JSON] = encodeStations(updated)
+            }
+        }
+    }
+
+    fun removeStation(id: String) {
+        scope.launch {
+            context.dataStore.edit { preferences ->
+                val existing = decodeStations(preferences[PreferencesKeys.RADIO_STATIONS_JSON])
+                val updated = existing.filterNot { it.id == id }
+                preferences[PreferencesKeys.RADIO_STATIONS_JSON] = encodeStations(updated)
+                if (preferences[PreferencesKeys.SELECTED_STATION_ID] == id) {
+                    preferences.remove(PreferencesKeys.SELECTED_STATION_ID)
+                }
+            }
+        }
+    }
+
+    fun setSelectedStation(id: String?) {
+        scope.launch {
+            context.dataStore.edit { preferences ->
+                if (id.isNullOrBlank()) {
+                    preferences.remove(PreferencesKeys.SELECTED_STATION_ID)
+                } else {
+                    preferences[PreferencesKeys.SELECTED_STATION_ID] = id
+                }
+            }
+        }
+    }
+
+    private fun decodeStations(raw: String?): List<RadioStation> {
+        val defaultStations = listOf(
+            RadioStation("capital_london", "Capital London", "https://media-ssl.musicradio.com/CapitalLondonMP3"),
+            RadioStation("lbc_london", "LBC News London", "https://media-ssl.musicradio.com/LBCNewsMP3"),
+            RadioStation("radio_x_london", "Radio X London", "https://media-ssl.musicradio.com/RadioXLondonMP3"),
+            RadioStation("smooth_london", "Smooth London", "https://media-ssl.musicradio.com/SmoothLondonMP3"),
+            RadioStation("heart_london", "Heart London", "https://media-ssl.musicradio.com/HeartLondonMP3")
+        )
+
+        if (raw.isNullOrBlank()) return defaultStations
+        return try {
+            val arr = JSONArray(raw)
+            val decoded = buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val id = obj.optString("id", "")
+                    val name = obj.optString("name", "")
+                    val url = obj.optString("url", "")
+                    if (id.isNotBlank() && name.isNotBlank() && url.isNotBlank()) {
+                        add(RadioStation(id = id, name = name, url = url))
+                    }
+                }
+            }
+            
+            // Merge defaults that are not already present (by ID)
+            val existingIds = decoded.map { it.id }.toSet()
+            val missingDefaults = defaultStations.filter { it.id !in existingIds }
+            
+            decoded + missingDefaults
+        } catch (_: Exception) {
+            defaultStations
+        }
+    }
+
+    private fun encodeStations(stations: List<RadioStation>): String {
+        val arr = JSONArray()
+        stations.forEach { s ->
+            val obj = JSONObject()
+            obj.put("id", s.id)
+            obj.put("name", s.name)
+            obj.put("url", s.url)
+            arr.put(obj)
+        }
+        return arr.toString()
     }
 }

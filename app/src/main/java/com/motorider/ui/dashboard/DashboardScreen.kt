@@ -35,9 +35,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.motorider.ui.dashboard.components.Speedometer
-import com.motorider.ui.dashboard.components.PerformanceStatsCard
-import com.motorider.ui.dashboard.components.WeatherOverlay
-import com.motorider.ui.dashboard.components.WindIndicator
 import com.motorider.ui.theme.DarkBackground
 import com.motorider.ui.theme.NeonCyan
 import com.motorider.ui.theme.TextSecondary
@@ -60,8 +57,6 @@ fun DashboardScreen(
     val state by viewModel.dashboardState.collectAsState()
     val speedLimit by viewModel.speedLimit.collectAsState()
     val useMph by viewModel.useMph.collectAsState()
-    val isWeatherLoading by viewModel.isWeatherLoading.collectAsState()
-    val relativeWind by viewModel.relativeWind.collectAsState()
     
     Box(
         modifier = Modifier
@@ -77,18 +72,14 @@ fun DashboardScreen(
         ) {
             // Top action bar
             TopActionBar(
-                isRecording = state.isTripActive,
-                recordingDuration = state.tripDurationFormatted,
-                onHistoryClick = onNavigateToHistory,
                 onSettingsClick = onNavigateToSettings,
                 onAnnounceClick = { viewModel.announceSpeed() }
             )
             
-            // Main speedometer - takes available space and centers itself
+            // Speedometer centered in the remaining space
             Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
                 Speedometer(
@@ -96,35 +87,6 @@ fun DashboardScreen(
                     alertState = state.alertState,
                     speedLimit = speedLimit,
                     useMph = useMph,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-            
-            // Bottom Cards Section - scrollable if content overflows
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // Performance Stats
-                PerformanceStatsCard(
-                    stats = state.performanceStats,
-                    useMph = useMph,
-                    onResetTopSpeed = { viewModel.resetTopSpeed() },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                
-                // Wind indicator
-                WindIndicator(
-                    wind = relativeWind,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                
-                // Weather overlay
-                WeatherOverlay(
-                    weather = state.weather,
-                    isLoading = isWeatherLoading,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -137,9 +99,6 @@ fun DashboardScreen(
  */
 @Composable
 private fun TopActionBar(
-    isRecording: Boolean,
-    recordingDuration: String,
-    onHistoryClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onAnnounceClick: () -> Unit
 ) {
@@ -148,55 +107,20 @@ private fun TopActionBar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // History button
+        // Empty space to balance the layout (optional, but keeps centering symmetric)
+        Spacer(modifier = Modifier.size(48.dp))
+        
+        // Center Area (Announce Action)
         IconButton(
-            onClick = onHistoryClick,
+            onClick = onAnnounceClick,
             modifier = Modifier.size(48.dp)
         ) {
             Icon(
-                imageVector = Icons.Default.History,
-                contentDescription = "Trip History",
-                tint = TextSecondary,
+                imageVector = Icons.Default.VolumeUp,
+                contentDescription = "Announce Speed",
+                tint = NeonCyan,
                 modifier = Modifier.size(28.dp)
             )
-        }
-        
-        // Center Area (Announce + REC status)
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            IconButton(
-                onClick = onAnnounceClick,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.VolumeUp,
-                    contentDescription = "Announce Speed",
-                    tint = NeonCyan,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-            
-            if (isRecording) {
-                val infiniteTransition = rememberInfiniteTransition(label = "rec_pulse")
-                val alpha by infiniteTransition.animateFloat(
-                    initialValue = 0.5f,
-                    targetValue = 1f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(800, easing = LinearEasing),
-                        repeatMode = RepeatMode.Reverse
-                    ),
-                    label = "alpha"
-                )
-                
-                Text(
-                    text = "● REC $recordingDuration",
-                    color = NeonRed,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.alpha(alpha)
-                )
-            }
         }
         
         // Settings button

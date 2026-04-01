@@ -16,13 +16,8 @@ import androidx.core.app.NotificationCompat
 import com.motorider.MainActivity
 import com.motorider.R
 import com.motorider.core.alert.HapticSpeedAlertManager
-import com.motorider.data.entity.ActiveTrip
-import com.motorider.data.entity.RoutePoint
 import com.motorider.data.repository.LocationRepository
-import com.motorider.data.repository.RouteRepository
 import com.motorider.data.repository.SettingsRepository
-import com.motorider.data.repository.WeatherRepository
-import com.motorider.core.performance.PerformanceTracker
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -52,11 +47,8 @@ import javax.inject.Inject
 class LocationForegroundService : Service() {
     
     @Inject lateinit var locationRepository: LocationRepository
-    @Inject lateinit var weatherRepository: WeatherRepository
-    @Inject lateinit var routeRepository: RouteRepository
     @Inject lateinit var hapticAlertManager: HapticSpeedAlertManager
     @Inject lateinit var settingsRepository: SettingsRepository
-    @Inject lateinit var performanceTracker: PerformanceTracker
     
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var locationJob: Job? = null
@@ -64,40 +56,19 @@ class LocationForegroundService : Service() {
     
     private val binder = LocalBinder()
     
-    // Trip state
-    private val _activeTrip = MutableStateFlow<ActiveTrip?>(null)
-    val activeTrip: StateFlow<ActiveTrip?> = _activeTrip.asStateFlow()
-    
-    private val _isTripActive = MutableStateFlow(false)
-    val isTripActive: StateFlow<Boolean> = _isTripActive.asStateFlow()
-    
     // Speed limit for alerts (configurable)
     private var speedLimitKmh: Double = 120.0
     private var enableHapticAlerts: Boolean = true
     
     private var lastLocation: Location? = null
     
-    // Auto-detection state
-    private val _isAutoRecording = MutableStateFlow(false)
-    val isAutoRecording: StateFlow<Boolean> = _isAutoRecording.asStateFlow()
-    private var movingStartTime: Long = 0
-    private var stoppedStartTime: Long = 0
-    
     companion object {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "motorider_location_channel"
         
-        // Auto-detection thresholds
-        private const val START_SPEED_THRESHOLD_KMH = 5.0  // Start when > 5 km/h
-        private const val STOP_SPEED_THRESHOLD_KMH = 3.0   // Stop when < 3 km/h
-        private const val START_DELAY_MS = 2_000L          // 2 seconds of movement
-        private const val STOP_DELAY_MS = 60_000L          // 60 seconds of stillness
-        
         // Actions
         const val ACTION_START = "com.motorider.action.START"
         const val ACTION_STOP = "com.motorider.action.STOP"
-        const val ACTION_START_TRIP = "com.motorider.action.START_TRIP"
-        const val ACTION_STOP_TRIP = "com.motorider.action.STOP_TRIP"
         
         // Extras
         const val EXTRA_SPEED_LIMIT = "speed_limit"
@@ -126,12 +97,6 @@ class LocationForegroundService : Service() {
             }
             ACTION_STOP -> {
                 stopForegroundTracking()
-            }
-            ACTION_START_TRIP -> {
-                startTrip()
-            }
-            ACTION_STOP_TRIP -> {
-                stopTrip()
             }
         }
         
@@ -168,160 +133,10 @@ class LocationForegroundService : Service() {
             hapticAlertManager.checkSpeed(speedKmh, speedLimitKmh)
         }
         
-        // Update performance tracker
-        performanceTracker.processLocation(location, speedKmh)
-        
-        // Auto-detection logic
-        if (settingsRepository.autoRecordEnabled.value) {
-            checkAutoDetection(speedKmh)
-        }
-        
-        // Record point if trip is active
-        if (_isTripActive.value) {
-            recordTripPoint(location, speedKmh)
-        }
-        
-        // Update weather if needed (handled by repository caching)
-        weatherRepository.fetchWeather(location)
-        
         // Update notification
         updateNotification(speedKmh)
         
         lastLocation = location
-    }
-    
-    /**
-     * Check if we should auto-start or auto-stop trip based on speed.
-     */
-    private fun checkAutoDetection(speedKmh: Double) {
-        val now = System.currentTimeMillis()
-        
-        if (!_isTripActive.value) {
-            // Not recording - check if we should start
-            if (speedKmh > START_SPEED_THRESHOLD_KMH) {
-                if (movingStartTime == 0L) {
-                    movingStartTime = now
-                } else if (now - movingStartTime >= START_DELAY_MS) {
-                    // Sustained movement detected - auto-start trip
-                    startAutoTrip()
-                    movingStartTime = 0
-                }
-                stoppedStartTime = 0
-            } else {
-                movingStartTime = 0
-            }
-        } else if (_isAutoRecording.value) {
-            // Auto-recording active - check if we should stop
-            if (speedKmh < STOP_SPEED_THRESHOLD_KMH) {
-                if (stoppedStartTime == 0L) {
-                    stoppedStartTime = now
-                } else if (now - stoppedStartTime >= STOP_DELAY_MS) {
-                    // Sustained stillness detected - auto-stop trip
-                    stopAutoTrip()
-                    stoppedStartTime = 0
-                }
-                movingStartTime = 0
-            } else {
-                stoppedStartTime = 0
-            }
-        }
-    }
-    
-    /**
-     * Auto-start a new trip with generated name.
-     */
-    private fun startAutoTrip() {
-        val dateFormat = java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault())
-        val tripName = "Ride " + dateFormat.format(java.util.Date())
-        _activeTrip.value = ActiveTrip()
-        _isTripActive.value = true
-        _isAutoRecording.value = true
-        updateNotification(locationRepository.currentSpeed.value, tripActive = true)
-    }
-    
-    /**
-     * Auto-stop trip and save with generated name.
-     */
-    private fun stopAutoTrip() {
-        val trip = _activeTrip.value
-        
-        if (trip != null && trip.points.isNotEmpty()) {
-            val dateFormat = java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault())
-            val tripName = "Ride " + dateFormat.format(java.util.Date(trip.startTime))
-            
-            serviceScope.launch {
-                routeRepository.saveRoute(
-                    name = tripName,
-                    points = trip.points.toList(),
-                    startTime = trip.startTime,
-                    endTime = System.currentTimeMillis(),
-                    totalDistanceMeters = trip.totalDistanceMeters,
-                    maxSpeedKmh = trip.maxSpeedKmh,
-                    avgSpeedKmh = trip.avgSpeedKmh
-                )
-            }
-        }
-        
-        _activeTrip.value = null
-        _isTripActive.value = false
-        _isAutoRecording.value = false
-        updateNotification(locationRepository.currentSpeed.value, tripActive = false)
-    }
-    
-    /**
-     * Record a GPS point to the active trip.
-     */
-    private fun recordTripPoint(location: Location, speedKmh: Double) {
-        val trip = _activeTrip.value ?: return
-        
-        val point = RoutePoint(
-            latitude = location.latitude,
-            longitude = location.longitude,
-            altitude = if (location.hasAltitude()) location.altitude else null,
-            speedKmh = speedKmh,
-            timestamp = System.currentTimeMillis(),
-            accuracy = location.accuracy
-        )
-        
-        // Calculate distance from last point
-        val distanceFromLast = lastLocation?.let { location.distanceTo(it).toDouble() } ?: 0.0
-        
-        trip.addPoint(point, distanceFromLast)
-        _activeTrip.value = trip
-    }
-    
-    /**
-     * Start a new trip recording.
-     */
-    fun startTrip() {
-        _activeTrip.value = ActiveTrip()
-        _isTripActive.value = true
-        updateNotification(locationRepository.currentSpeed.value, tripActive = true)
-    }
-    
-    /**
-     * Stop trip recording and save to database.
-     */
-    fun stopTrip(tripName: String = "My Ride") {
-        val trip = _activeTrip.value
-        
-        if (trip != null && trip.points.isNotEmpty()) {
-            serviceScope.launch {
-                routeRepository.saveRoute(
-                    name = tripName,
-                    points = trip.points.toList(),
-                    startTime = trip.startTime,
-                    endTime = System.currentTimeMillis(),
-                    totalDistanceMeters = trip.totalDistanceMeters,
-                    maxSpeedKmh = trip.maxSpeedKmh,
-                    avgSpeedKmh = trip.avgSpeedKmh
-                )
-            }
-        }
-        
-        _activeTrip.value = null
-        _isTripActive.value = false
-        updateNotification(locationRepository.currentSpeed.value, tripActive = false)
     }
     
     /**
@@ -389,13 +204,8 @@ class LocationForegroundService : Service() {
             .build()
     }
     
-    private fun updateNotification(speedKmh: Double, tripActive: Boolean = _isTripActive.value) {
-        val tripStatus = if (tripActive) {
-            val trip = _activeTrip.value
-            " | Recording: ${String.format("%.1f", (trip?.totalDistanceMeters ?: 0.0) / 1000)} km"
-        } else ""
-        
-        val contentText = "Speed: ${speedKmh.toInt()} km/h$tripStatus"
+    private fun updateNotification(speedKmh: Double) {
+        val contentText = "Speed: ${speedKmh.toInt()} km/h"
         
         val notification = createNotification(contentText)
         val notificationManager = getSystemService(NotificationManager::class.java)

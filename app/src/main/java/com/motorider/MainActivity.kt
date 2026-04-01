@@ -5,6 +5,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,15 +15,24 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.composable
+import com.motorider.data.repository.SettingsRepository
 import com.motorider.service.LocationForegroundService
+import com.motorider.service.OverlayService
 import com.motorider.ui.dashboard.DashboardScreen
 import com.motorider.ui.dashboard.DashboardViewModel
 import com.motorider.ui.theme.MotoRiderTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject lateinit var settingsRepository: SettingsRepository
     
     private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -47,6 +58,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // Keep screen on while app is running - essential for motorcycle dashboard
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        
+        setupOverlayCollector()
+
         setContent {
             MotoRiderTheme {
                 Surface(
@@ -60,14 +76,7 @@ class MainActivity : ComponentActivity() {
                             val viewModel = androidx.hilt.navigation.compose.hiltViewModel<com.motorider.ui.dashboard.DashboardViewModel>()
                             DashboardScreen(
                                 viewModel = viewModel,
-                                onNavigateToHistory = { navController.navigate("history") },
                                 onNavigateToSettings = { navController.navigate("settings") }
-                            )
-                        }
-                        
-                        composable("history") {
-                            com.motorider.ui.history.RideHistoryScreen(
-                                onBackClick = { navController.popBackStack() }
                             )
                         }
                         
@@ -84,6 +93,41 @@ class MainActivity : ComponentActivity() {
         }
         
         checkAndRequestPermissions()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Re-trigger overlay check in case user just granted permission
+        lifecycleScope.launch {
+            val enabled = settingsRepository.overlayEnabled.first()
+            updateOverlayService(enabled)
+        }
+    }
+
+    private fun updateOverlayService(enabled: Boolean) {
+        val canDraw = Settings.canDrawOverlays(this)
+        val intent = Intent(this, OverlayService::class.java).apply {
+            action = if (enabled && canDraw) OverlayService.ACTION_START else OverlayService.ACTION_STOP
+        }
+        
+        if (enabled && canDraw) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(this, intent)
+            } else {
+                startService(intent)
+            }
+        } else if (!enabled) {
+            // Only stop if explicitly disabled by user
+            startService(intent)
+        }
+    }
+
+    private fun setupOverlayCollector() {
+        lifecycleScope.launch {
+            settingsRepository.overlayEnabled.collectLatest { enabled ->
+                updateOverlayService(enabled)
+            }
+        }
     }
     
     private fun checkAndRequestPermissions() {
