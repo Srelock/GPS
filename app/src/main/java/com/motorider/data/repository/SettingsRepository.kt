@@ -72,9 +72,9 @@ class SettingsRepository @Inject constructor(
     // Use mph instead of km/h
     val useMph: StateFlow<Boolean> = context.dataStore.data
         .map { preferences ->
-            preferences[PreferencesKeys.USE_MPH] ?: false
+            preferences[PreferencesKeys.USE_MPH] ?: true
         }
-        .stateIn(scope, SharingStarted.Eagerly, false)
+        .stateIn(scope, SharingStarted.Eagerly, true)
 
     val overlayEnabled: StateFlow<Boolean> = context.dataStore.data
         .map { preferences ->

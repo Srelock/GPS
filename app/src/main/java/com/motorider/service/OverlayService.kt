@@ -154,6 +154,9 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
             y = initialY
         }
 
+        // Track window width as Compose state so font scales on resize
+        val overlayWidthDp = androidx.compose.runtime.mutableFloatStateOf(dpWidth.toFloat())
+
         val composeView = ComposeView(this).apply {
             // Also set them here for good measure
             setViewTreeLifecycleOwner(this@OverlayService)
@@ -165,6 +168,7 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
                     OverlayWindow(
                         locationRepository = locationRepository,
                         settingsRepository = settingsRepository,
+                        overlayWidthDp = overlayWidthDp.floatValue,
                         onClose = { stopOverlay() },
                         onMove = { dx, dy ->
                             params.x += dx.roundToInt()
@@ -178,6 +182,8 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
                             params.width = max(minWidthPx, params.width + dw.roundToInt())
                             params.height = max(minHeightPx, params.height + dh.roundToInt())
                             windowManager.updateViewLayout(root, params)
+                            // Update the state so Compose recomposes with new size
+                            overlayWidthDp.floatValue = params.width.toFloat() / density
                         },
                         onActionFinished = {
                             // Convert back to logical DP for storage
@@ -193,7 +199,13 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
                 }
             }
         }
-        root.addView(composeView)
+        root.addView(
+            composeView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
 
         try {
             windowManager.addView(root, params)
@@ -282,6 +294,7 @@ private fun PulsingStatus() {
 private fun OverlayWindow(
     locationRepository: LocationRepository,
     settingsRepository: SettingsRepository,
+    overlayWidthDp: Float,
     onClose: () -> Unit,
     onMove: (Float, Float) -> Unit,
     onResize: (Float, Float) -> Unit,
@@ -351,26 +364,31 @@ private fun OverlayWindow(
             // Main Display Area
             Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(12.dp)) {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    // Speed Readout
+                    // Speed Readout — scales with overlay window size
+                    // Uses overlayWidthDp from WindowManager so it recomposes on resize
+                    val scaledSpeedSize = (overlayWidthDp / 4f).coerceIn(24f, 120f).sp
+                    val scaledUnitSize = (overlayWidthDp / 14f).coerceIn(10f, 32f).sp
+                    val unitPadding = (overlayWidthDp / 30f).coerceIn(4f, 20f).dp
+
+                    val displaySpeed = if (useMph) speedKmh * 0.621371 else speedKmh
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.Bottom
                     ) {
-                        val displaySpeed = if (useMph) speedKmh * 0.621371 else speedKmh
                         Text(
                             text = "${displaySpeed.toInt()}",
                             style = androidx.compose.ui.text.TextStyle(
-                                fontSize = 48.sp,
+                                fontSize = scaledSpeedSize,
                                 fontWeight = FontWeight.Black,
-                                color = com.motorider.ui.theme.TextPrimary
+                                color = com.motorider.ui.theme.NeonGreen
                             )
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
                             text = if (useMph) "MPH" else "KM/H",
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.padding(bottom = 10.dp),
+                            fontSize = scaledUnitSize,
+                            modifier = Modifier.padding(bottom = unitPadding),
                             color = com.motorider.ui.theme.NeonCyan,
                             fontWeight = FontWeight.Bold
                         )
