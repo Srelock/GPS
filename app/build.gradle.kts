@@ -94,6 +94,9 @@ dependencies {
     // DataStore for preferences
     implementation("androidx.datastore:datastore-preferences:1.0.0")
 
+    // Network
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
     // Media3 (ExoPlayer) for web radio playback
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")

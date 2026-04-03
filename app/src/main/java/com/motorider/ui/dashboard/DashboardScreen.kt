@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.motorider.ui.dashboard.components.Speedometer
+import androidx.compose.material.icons.filled.Close
 import com.motorider.ui.theme.DarkBackground
 import com.motorider.ui.theme.NeonCyan
 import com.motorider.ui.theme.TextSecondary
@@ -86,7 +87,7 @@ fun DashboardScreen(
                     speedKmh = state.speedKmh,
                     alertState = state.alertState,
                     speedLimit = speedLimit,
-                    useMph = useMph,
+                    roadSpeedLimit = state.roadSpeedLimit,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -102,13 +103,40 @@ private fun TopActionBar(
     onSettingsClick: () -> Unit,
     onAnnounceClick: () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Empty space to balance the layout (optional, but keeps centering symmetric)
-        Spacer(modifier = Modifier.size(48.dp))
+        // Quit/Stop All Button
+        IconButton(
+            onClick = {
+                // Stop everything
+                val radioIntent = android.content.Intent(context, com.motorider.service.RadioPlayerService::class.java).apply {
+                    action = com.motorider.service.RadioPlayerService.ACTION_STOP
+                }
+                val overlayIntent = android.content.Intent(context, com.motorider.service.OverlayService::class.java).apply {
+                    action = com.motorider.service.OverlayService.ACTION_STOP
+                }
+                val locIntent = android.content.Intent(context, com.motorider.service.LocationForegroundService::class.java).apply {
+                    action = com.motorider.service.LocationForegroundService.ACTION_STOP
+                }
+                context.startService(radioIntent)
+                context.startService(overlayIntent)
+                context.startService(locIntent)
+                (context as? android.app.Activity)?.finishAffinity()
+            },
+            modifier = Modifier.size(48.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Quit App",
+                tint = NeonRed,
+                modifier = Modifier.size(28.dp)
+            )
+        }
         
         // Center Area (Announce Action)
         IconButton(

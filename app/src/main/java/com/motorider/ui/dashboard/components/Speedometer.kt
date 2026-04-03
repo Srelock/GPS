@@ -5,6 +5,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,17 +32,16 @@ fun Speedometer(
     speedKmh: Double,
     alertState: SpeedAlertState,
     speedLimit: Double,
-    useMph: Boolean = false,
-    maxSpeed: Double = 120.0,
+    roadSpeedLimit: Double? = null,
+    maxSpeedInMph: Double = 80.0,
     modifier: Modifier = Modifier
 ) {
-    // Convert to mph if needed
-    val displaySpeed = if (useMph) speedKmh * 0.621371 else speedKmh
-    val speedInt = displaySpeed.toInt()
-    val unitLabel = if (useMph) "mph" else "km/h"
+    // Current app architecture uses km/h internally, but we now only show MPH
+    val displaySpeedMph = speedKmh * 0.621371
+    val speedInt = displaySpeedMph.toInt()
 
-    // Calculate max speed in display units
-    val maxDisplaySpeed = if (useMph) maxSpeed * 0.621371 else maxSpeed
+    // Calculate max speed bar in display units
+    val maxDisplaySpeed = maxSpeedInMph
     
     // Alert color logic
     val baseColor = when (alertState) {
@@ -58,7 +58,7 @@ fun Speedometer(
     )
     
     // Fraction of max speed (0.0 to 1.0)
-    val speedFraction = (displaySpeed / maxDisplaySpeed).coerceIn(0.0, 1.0).toFloat()
+    val speedFraction = (displaySpeedMph / maxDisplaySpeed).coerceIn(0.0, 1.0).toFloat()
     
     // Animate the bar expansion
     val animatedFraction by animateFloatAsState(
@@ -83,41 +83,59 @@ fun Speedometer(
             modifier = Modifier.fillMaxSize()
         ) {
             
-            // 1. Digital 7-Segment Speed Reading
+            // Digital Speed Reading
             Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                // Determine how many digits to show
-                val speedStr = speedInt.toString()
-                
-                // Show at least 2 digits (e.g., "05") or more
-                val displayStr = if (speedStr.length < 2) speedStr.padStart(2, ' ') else speedStr
+                // 1. Show real road speed limit if available (LEFT)
+                roadSpeedLimit?.let { limitKmh ->
+                    val displayLimit = limitKmh * 0.621371
+                    
+                    Surface(
+                        modifier = Modifier.size(75.dp),
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                        color = androidx.compose.ui.graphics.Color.White,
+                        border = androidx.compose.foundation.BorderStroke(4.dp, androidx.compose.ui.graphics.Color.Red),
+                        shadowElevation = 8.dp
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "${Math.round(displayLimit).toInt()}",
+                                color = androidx.compose.ui.graphics.Color.Black,
+                                style = MaterialTheme.typography.headlineLarge.copy(
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(24.dp))
+                }
 
-                displayStr.forEach { char ->
-                    if (char == ' ') {
-                        // Empty space for padding
-                        Spacer(modifier = Modifier.size(width = 60.dp, height = 100.dp))
-                    } else {
-                        SevenSegmentDigit(
-                            digit = char.digitToInt(),
-                            color = TextPrimary,
-                            modifier = Modifier.size(width = 60.dp, height = 100.dp)
-                        )
+                // 2. Main Speed Digits (RIGHT)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val speedStr = speedInt.toString()
+                    val displayStr = if (speedStr.length < 2) speedStr.padStart(2, ' ') else speedStr
+
+                    displayStr.forEach { char ->
+                        if (char == ' ') {
+                            Spacer(modifier = Modifier.size(width = 60.dp, height = 100.dp))
+                        } else {
+                            SevenSegmentDigit(
+                                digit = char.digitToInt(),
+                                color = TextPrimary,
+                                modifier = Modifier.size(width = 60.dp, height = 100.dp)
+                            )
+                        }
                     }
                 }
             }
             
             Spacer(modifier = Modifier.height(12.dp))
-
-            Text(
-                text = unitLabel.uppercase(),
-                style = MaterialTheme.typography.titleMedium.copy(
-                    letterSpacing = 6.sp,
-                    fontWeight = FontWeight.Bold
-                ),
-                color = hudColor
-            )
 
             Spacer(modifier = Modifier.height(20.dp))
 

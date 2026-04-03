@@ -203,17 +203,20 @@ class SettingsRepository @Inject constructor(
 
     private fun decodeStations(raw: String?): List<RadioStation> {
         val defaultStations = listOf(
-            RadioStation("capital_london", "Capital London", "https://media-ssl.musicradio.com/CapitalLondonMP3"),
-            RadioStation("lbc_london", "LBC News London", "https://media-ssl.musicradio.com/LBCNewsMP3"),
-            RadioStation("radio_x_london", "Radio X London", "https://media-ssl.musicradio.com/RadioXLondonMP3"),
-            RadioStation("smooth_london", "Smooth London", "https://media-ssl.musicradio.com/SmoothLondonMP3"),
-            RadioStation("heart_london", "Heart London", "https://media-ssl.musicradio.com/HeartLondonMP3")
+            RadioStation("capital_fm", "Capital FM", "https://media-ssl.musicradio.com/CapitalMP3"),
+            RadioStation("heart_london", "Heart London", "https://media-ssl.musicradio.com/HeartLondonMP3"),
+            RadioStation("lbc_london", "LBC London", "https://media-ssl.musicradio.com/LBCLondonMP3"),
+            RadioStation("radio_x_uk", "Radio X", "https://media-ssl.musicradio.com/RadioXUKMP3"),
+            RadioStation("smooth_london", "Smooth London", "https://media-ssl.musicradio.com/SmoothLondonMP3")
         )
 
-        if (raw.isNullOrBlank()) return defaultStations
+        // If nothing has ever been saved, return defaults
+        if (raw == null) return defaultStations
+        if (raw.isBlank()) return emptyList()
+
         return try {
             val arr = JSONArray(raw)
-            val decoded = buildList {
+            buildList {
                 for (i in 0 until arr.length()) {
                     val obj = arr.optJSONObject(i) ?: continue
                     val id = obj.optString("id", "")
@@ -224,12 +227,6 @@ class SettingsRepository @Inject constructor(
                     }
                 }
             }
-            
-            // Merge defaults that are not already present (by ID)
-            val existingIds = decoded.map { it.id }.toSet()
-            val missingDefaults = defaultStations.filter { it.id !in existingIds }
-            
-            decoded + missingDefaults
         } catch (_: Exception) {
             defaultStations
         }

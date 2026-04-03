@@ -40,14 +40,16 @@ class DashboardViewModel @Inject constructor(
     // Current state from repositories
     val currentSpeed: StateFlow<Double> = locationRepository.currentSpeed
     val alertState: StateFlow<SpeedAlertState> = hapticAlertManager.alertState
+    val roadSpeedLimit: StateFlow<Double?> = locationRepository.roadSpeedLimit
     
     // Combined UI state for the dashboard
     val dashboardState: StateFlow<DashboardUiState> = combine(
-        currentSpeed, alertState
-    ) { speed, alert ->
+        currentSpeed, alertState, roadSpeedLimit
+    ) { speed, alert, roadLimit ->
         DashboardUiState(
             speedKmh = speed,
-            alertState = alert
+            alertState = alert,
+            roadSpeedLimit = roadLimit
         )
     }.stateIn(
         scope = viewModelScope,
@@ -123,7 +125,8 @@ class DashboardViewModel @Inject constructor(
  */
 data class DashboardUiState(
     val speedKmh: Double = 0.0,
-    val alertState: SpeedAlertState = SpeedAlertState.NORMAL
+    val alertState: SpeedAlertState = SpeedAlertState.NORMAL,
+    val roadSpeedLimit: Double? = null
 ) {
     val speedInt: Int get() = speedKmh.toInt()
 }
