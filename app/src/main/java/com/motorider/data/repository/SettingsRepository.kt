@@ -41,6 +41,16 @@ class SettingsRepository @Inject constructor(
         val url: String
     )
 
+    /**
+     * HUD layout modes for the floating overlay.
+     */
+    enum class HudMode(val label: String) {
+        SPEED_ONLY("Speed Only"),
+        SPEED_RADIO("Speed + Radio"),
+        SPEED_ALERTS("Speed + Alerts"),
+        FULL_HUD("Full HUD")
+    }
+
     private object PreferencesKeys {
         val SPEED_LIMIT_KMH = doublePreferencesKey("speed_limit_kmh")
         val HAPTIC_ENABLED = booleanPreferencesKey("haptic_enabled")
@@ -53,6 +63,21 @@ class SettingsRepository @Inject constructor(
         val OVERLAY_HEIGHT = doublePreferencesKey("overlay_height")
         val RADIO_STATIONS_JSON = stringPreferencesKey("radio_stations_json")
         val SELECTED_STATION_ID = stringPreferencesKey("selected_station_id")
+
+        // Night mode
+        val NIGHT_MODE_AUTO = booleanPreferencesKey("night_mode_auto")
+        val NIGHT_MODE_FORCED = booleanPreferencesKey("night_mode_forced")
+
+        // HUD layout mode
+        val HUD_MODE = stringPreferencesKey("hud_mode")
+
+        // Favourite routes
+        val ROUTES_JSON = stringPreferencesKey("routes_json")
+        val ACTIVE_ROUTE_ID = stringPreferencesKey("active_route_id")
+        val RECORDING_ROUTE = booleanPreferencesKey("recording_route")
+
+        // Speed camera alerts
+        val SPEED_CAMERAS_ENABLED = booleanPreferencesKey("speed_cameras_enabled")
     }
 
     // Default 120 km/h
@@ -118,6 +143,53 @@ class SettingsRepository @Inject constructor(
             preferences[PreferencesKeys.SELECTED_STATION_ID]
         }
         .stateIn(scope, SharingStarted.Eagerly, null)
+
+    // Night mode settings
+    val nightModeAuto: StateFlow<Boolean> = context.dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.NIGHT_MODE_AUTO] ?: true
+        }
+        .stateIn(scope, SharingStarted.Eagerly, true)
+
+    val nightModeForced: StateFlow<Boolean> = context.dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.NIGHT_MODE_FORCED] ?: false
+        }
+        .stateIn(scope, SharingStarted.Eagerly, false)
+
+    // HUD layout mode
+    val hudMode: StateFlow<HudMode> = context.dataStore.data
+        .map { preferences ->
+            val raw = preferences[PreferencesKeys.HUD_MODE]
+            try { HudMode.valueOf(raw ?: "") } catch (_: Exception) { HudMode.SPEED_RADIO }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, HudMode.SPEED_RADIO)
+
+    // Speed camera alerts enabled
+    val speedCamerasEnabled: StateFlow<Boolean> = context.dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.SPEED_CAMERAS_ENABLED] ?: true
+        }
+        .stateIn(scope, SharingStarted.Eagerly, true)
+
+    // Favourite routes
+    val routesJson: StateFlow<String> = context.dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.ROUTES_JSON] ?: "[]"
+        }
+        .stateIn(scope, SharingStarted.Eagerly, "[]")
+
+    val activeRouteId: StateFlow<String?> = context.dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.ACTIVE_ROUTE_ID]
+        }
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
+    val isRecordingRoute: StateFlow<Boolean> = context.dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.RECORDING_ROUTE] ?: false
+        }
+        .stateIn(scope, SharingStarted.Eagerly, false)
 
     fun setSpeedLimit(limit: Double) {
         scope.launch {
@@ -201,14 +273,63 @@ class SettingsRepository @Inject constructor(
         }
     }
 
+    // Night mode setters
+    fun setNightModeAuto(enabled: Boolean) {
+        scope.launch {
+            context.dataStore.edit { it[PreferencesKeys.NIGHT_MODE_AUTO] = enabled }
+        }
+    }
+
+    fun setNightModeForced(forced: Boolean) {
+        scope.launch {
+            context.dataStore.edit { it[PreferencesKeys.NIGHT_MODE_FORCED] = forced }
+        }
+    }
+
+    // HUD mode setter
+    fun setHudMode(mode: HudMode) {
+        scope.launch {
+            context.dataStore.edit { it[PreferencesKeys.HUD_MODE] = mode.name }
+        }
+    }
+
+    // Speed camera toggle
+    fun setSpeedCamerasEnabled(enabled: Boolean) {
+        scope.launch {
+            context.dataStore.edit { it[PreferencesKeys.SPEED_CAMERAS_ENABLED] = enabled }
+        }
+    }
+
+    // Route setters
+    fun setRoutesJson(json: String) {
+        scope.launch {
+            context.dataStore.edit { it[PreferencesKeys.ROUTES_JSON] = json }
+        }
+    }
+
+    fun setActiveRouteId(id: String?) {
+        scope.launch {
+            context.dataStore.edit { preferences ->
+                if (id.isNullOrBlank()) preferences.remove(PreferencesKeys.ACTIVE_ROUTE_ID)
+                else preferences[PreferencesKeys.ACTIVE_ROUTE_ID] = id
+            }
+        }
+    }
+
+    fun setRecordingRoute(recording: Boolean) {
+        scope.launch {
+            context.dataStore.edit { it[PreferencesKeys.RECORDING_ROUTE] = recording }
+        }
+    }
+
     private fun decodeStations(raw: String?): List<RadioStation> {
         val defaultStations = listOf(
             RadioStation("capital_fm", "Capital FM", "https://media-ssl.musicradio.com/CapitalMP3"),
             RadioStation("capital_dance", "Capital Dance", "https://media-ssl.musicradio.com/CapitalDanceMP3"),
-            RadioStation("kiss_fm", "Kiss FM", "https://stream-mz.planetradio.co.uk/kissnational.mp3"),
+            RadioStation("kiss_fm", "Kiss FM", "https://live-bauerkiss.sharp-stream.com/kissnational.aac"),
             RadioStation("heart_dance", "Heart Dance", "https://media-ssl.musicradio.com/HeartDanceMP3"),
-            RadioStation("planet_rock", "Planet Rock", "https://stream-mz.planetradio.co.uk/planetrock.mp3"),
-            RadioStation("absolute_radio", "Absolute Radio", "https://stream-mz.planetradio.co.uk/absoluteradio.mp3"),
+            RadioStation("planet_rock", "Planet Rock", "https://stream-mz.hellorayo.co.uk/planetrock.aac"),
+            RadioStation("absolute_radio", "Absolute Radio", "https://stream-ar.hellorayo.co.uk/absoluteradiohigh.aac"),
             RadioStation("radio_x_uk", "Radio X", "https://media-ssl.musicradio.com/RadioXUKMP3"),
             RadioStation("heart_london", "Heart London", "https://media-ssl.musicradio.com/HeartLondonMP3"),
             RadioStation("lbc_london", "LBC London", "https://media-ssl.musicradio.com/LBCLondonMP3"),

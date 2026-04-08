@@ -26,7 +26,9 @@ import javax.inject.Singleton
 class LocationRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val fusedLocationClient: FusedLocationProviderClient,
-    private val roadSpeedRepository: RoadSpeedRepository
+    private val roadSpeedRepository: RoadSpeedRepository,
+    private val speedCameraRepository: SpeedCameraRepository,
+    private val routeRepository: RouteRepository
 ) {
     private val _currentLocation = MutableStateFlow<Location?>(null)
     val currentLocation: StateFlow<Location?> = _currentLocation.asStateFlow()
@@ -37,14 +39,20 @@ class LocationRepository @Inject constructor(
     // Auto-detected speed limit from OSM
     private val _roadSpeedLimit = MutableStateFlow<Double?>(null)
     val roadSpeedLimit: StateFlow<Double?> = _roadSpeedLimit.asStateFlow()
+
+    // Nearest speed camera distance in meters (null = no cameras nearby)
+    private val _nearestCameraDistance = MutableStateFlow<Float?>(null)
+    val nearestCameraDistance: StateFlow<Float?> = _nearestCameraDistance.asStateFlow()
+    
     
     private var lastRoadLimitFetchTime = 0L
     private var lastRoadLimitFetchLocation: Location? = null
+
+    private var lastCameraFetchTime = 0L
+    private var lastCameraFetchLocation: Location? = null
     
     private val _currentHeading = MutableStateFlow(0f)
     val currentHeading: StateFlow<Float> = _currentHeading.asStateFlow() // degrees
-    
-    private var locationCallback: LocationCallback? = null
     private val scope = MainScope()
 
     companion object {
@@ -52,6 +60,11 @@ class LocationRepository @Inject constructor(
         private const val ROAD_LIMIT_FETCH_COOLDOWN_MS = 15000L // 15 seconds min
         private const val ROAD_LIMIT_MIN_DISTANCE_M = 50.0      // 50 meters min
         private const val SPEED_THRESHOLD_KMH = 5.0
+
+        // Speed camera thresholds
+        private const val CAMERA_FETCH_COOLDOWN_MS = 30000L     // 30 seconds
+        private const val CAMERA_FETCH_MIN_DISTANCE_M = 500.0   // 500 meters
+        private const val CAMERA_ALERT_RANGE_M = 500f           // Show alert within 500m
     }
     
     @SuppressLint("MissingPermission")
@@ -73,17 +86,18 @@ class LocationRepository @Inject constructor(
                     if (location.hasBearing()) _currentHeading.value = location.bearing
                     
                     checkAndFetchRoadSpeed(location)
+                    checkAndFetchCameras(location)
+                    checkCameraProximity(location)
+                    recordRoutePoint(location)
                     trySend(location)
                 }
             }
         }
         
-        locationCallback = callback
         fusedLocationClient.requestLocationUpdates(locationRequest, callback, Looper.getMainLooper())
         
         awaitClose {
             fusedLocationClient.removeLocationUpdates(callback)
-            locationCallback = null
         }
     }
 
@@ -105,12 +119,37 @@ class LocationRepository @Inject constructor(
         }
     }
 
-    fun stopLocationUpdates() {
-        locationCallback?.let {
-            fusedLocationClient.removeLocationUpdates(it)
-            locationCallback = null
+    private fun checkAndFetchCameras(location: Location) {
+        val now = System.currentTimeMillis()
+        val dt = now - lastCameraFetchTime
+        val dist = lastCameraFetchLocation?.distanceTo(location) ?: Float.MAX_VALUE
+
+        if (dt > CAMERA_FETCH_COOLDOWN_MS && dist > CAMERA_FETCH_MIN_DISTANCE_M) {
+            lastCameraFetchTime = now
+            lastCameraFetchLocation = location
+
+            scope.launch(Dispatchers.IO) {
+                speedCameraRepository.getCamerasNear(location.latitude, location.longitude)
+            }
         }
     }
+
+    private fun checkCameraProximity(location: Location) {
+        val nearest = speedCameraRepository.findNearestCamera(
+            location.latitude, location.longitude
+        )
+        _nearestCameraDistance.value = nearest?.let { (_, dist) ->
+            if (dist <= CAMERA_ALERT_RANGE_M) dist else null
+        }
+    }
+
+    private fun recordRoutePoint(location: Location) {
+        // Only record if route recording is active
+        // This is checked by whether the repository has points being buffered
+        // The actual recording state toggle is managed by the ViewModel
+        routeRepository.recordPoint(location.latitude, location.longitude)
+    }
+
 
     @SuppressLint("MissingPermission")
     suspend fun getLastLocation(): Location? {
@@ -123,3 +162,4 @@ class LocationRepository @Inject constructor(
         } catch (e: Exception) { null }
     }
 }
+

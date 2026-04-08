@@ -83,16 +83,25 @@ class LocationForegroundService : Service() {
     
     override fun onBind(intent: Intent?): IBinder = binder
     
+    private var serviceStartTime = 0L
+    private var lastLocationTime = 0L
+    private var stalledCheckJob: Job? = null
+    
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Satisfaction of Android's foreground service requirement MUST happen immediately
+        val startNotification = createNotification("Starting tracking...")
+        startForeground(NOTIFICATION_ID, startNotification)
+        
         when (intent?.action) {
             ACTION_START -> {
                 speedLimitKmh = intent.getDoubleExtra(EXTRA_SPEED_LIMIT, 120.0)
                 enableHapticAlerts = intent.getBooleanExtra(EXTRA_ENABLE_HAPTICS, true)
+                serviceStartTime = System.currentTimeMillis()
                 startForegroundTracking()
             }
             ACTION_STOP -> {
@@ -104,20 +113,51 @@ class LocationForegroundService : Service() {
     }
     
     /**
-     * Start foreground service with notification and GPS tracking.
+     * Start foreground tracking with notification and GPS.
      */
     private fun startForegroundTracking() {
         // Acquire wake lock to keep CPU running
         acquireWakeLock()
         
-        // Start foreground with notification
-        val notification = createNotification("Starting...")
-        startForeground(NOTIFICATION_ID, notification)
+        // Cancel any existing jobs to prevent stacking
+        locationJob?.cancel()
+        stalledCheckJob?.cancel()
         
         // Start location updates
+        launchLocationJob()
+        
+        // Periodically check if GPS is stalled
+        startStalledCheck()
+    }
+
+    private fun launchLocationJob() {
+        locationJob?.cancel()
         locationJob = serviceScope.launch {
             locationRepository.startLocationUpdates(highAccuracy = true).collect { location ->
+                lastLocationTime = System.currentTimeMillis()
                 processLocationUpdate(location)
+            }
+        }
+    }
+
+    private fun startStalledCheck() {
+        stalledCheckJob?.cancel()
+        stalledCheckJob = serviceScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(5000)
+                val now = System.currentTimeMillis()
+                
+                if (lastLocationTime > 0) {
+                    // We had a location, but it stopped (6s gap)
+                    if (now - lastLocationTime > 6000) {
+                        launchLocationJob()
+                    }
+                } else if (now - serviceStartTime > 15000) {
+                    // Never received a location within 15s of service start
+                    // Refresh the start time and restart the job
+                    serviceStartTime = now
+                    launchLocationJob()
+                }
             }
         }
     }
@@ -144,6 +184,7 @@ class LocationForegroundService : Service() {
      */
     private fun stopForegroundTracking() {
         locationJob?.cancel()
+        stalledCheckJob?.cancel()
         hapticAlertManager.stopAlerts()
         releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)

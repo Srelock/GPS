@@ -50,6 +50,7 @@ import com.motorider.data.repository.SettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import java.util.Calendar
 import javax.inject.Inject
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -271,6 +272,15 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
     }
 }
 
+/**
+ * Simple night mode check based on time of day.
+ * Returns true if it's between 7pm and 6am (dark hours in London).
+ */
+private fun isNightTime(): Boolean {
+    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    return hour >= 19 || hour < 6
+}
+
 @Composable
 private fun PulsingStatus() {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -292,6 +302,56 @@ private fun PulsingStatus() {
     )
 }
 
+/**
+ * Pulsing camera warning icon.
+ */
+@Composable
+private fun PulsingCameraWarning(distanceM: Float, nightMode: Boolean) {
+    val infiniteTransition = rememberInfiniteTransition(label = "cameraPulse")
+
+    // Pulse faster when closer
+    val duration = if (distanceM < 300f) 400 else 800
+    val warnAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(duration),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "cameraAlpha"
+    )
+
+    val warnColor = if (nightMode) com.motorider.ui.theme.NeonRedDim else com.motorider.ui.theme.NeonRed
+    val textColor = if (nightMode) com.motorider.ui.theme.TextPrimaryDim else com.motorider.ui.theme.TextPrimary
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(warnAlpha)
+            .background(
+                warnColor.copy(alpha = 0.15f),
+                RoundedCornerShape(8.dp)
+            )
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "⚠",
+            fontSize = 16.sp,
+            color = warnColor
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = "CAMERA ${distanceM.toInt()}m",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.ExtraBold,
+            color = textColor,
+            letterSpacing = 1.sp
+        )
+    }
+}
+
 @Composable
 private fun OverlayWindow(
     locationRepository: LocationRepository,
@@ -308,14 +368,40 @@ private fun OverlayWindow(
     val selectedId by settingsRepository.selectedStationId.collectAsState()
     val selectedStation = stations.firstOrNull { it.id == selectedId } ?: stations.firstOrNull()
 
+    // Night mode
+    val nightAuto by settingsRepository.nightModeAuto.collectAsState()
+    val nightForced by settingsRepository.nightModeForced.collectAsState()
+    val isNight = nightForced || (nightAuto && isNightTime())
+
+    // HUD mode
+    val hudMode by settingsRepository.hudMode.collectAsState()
+
+    // Speed camera distance
+    val cameraDistM by locationRepository.nearestCameraDistance.collectAsState()
+    val camerasEnabled by settingsRepository.speedCamerasEnabled.collectAsState()
+
+    // Show sections based on HUD mode
+    val showRadio = hudMode == SettingsRepository.HudMode.SPEED_RADIO ||
+            hudMode == SettingsRepository.HudMode.FULL_HUD
+    val showAlerts = hudMode == SettingsRepository.HudMode.SPEED_ALERTS ||
+            hudMode == SettingsRepository.HudMode.FULL_HUD
+
     // Real-time playing state check via Service (rough proxy)
     var isPlaying by remember { mutableStateOf(false) }
+
+    // Night mode colour selection
+    val bgAlpha = if (isNight) 0.50f else 0.85f
+    val accentCyan = if (isNight) com.motorider.ui.theme.NeonCyanDim else com.motorider.ui.theme.NeonCyan
+    val accentGreen = if (isNight) com.motorider.ui.theme.NeonGreenDim else com.motorider.ui.theme.NeonGreen
+    val accentRed = if (isNight) com.motorider.ui.theme.NeonRedDim else com.motorider.ui.theme.NeonRed
+    val textMain = if (isNight) com.motorider.ui.theme.TextPrimaryDim else com.motorider.ui.theme.TextPrimary
+    val textSec = if (isNight) com.motorider.ui.theme.TextSecondaryDim else com.motorider.ui.theme.TextSecondary
 
     Surface(
         modifier = Modifier.fillMaxSize(),
         shape = RoundedCornerShape(16.dp),
-        color = com.motorider.ui.theme.DarkBackground.copy(alpha = 0.85f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, com.motorider.ui.theme.NeonCyan.copy(alpha = 0.4f)),
+        color = com.motorider.ui.theme.DarkBackground.copy(alpha = bgAlpha),
+        border = androidx.compose.foundation.BorderStroke(1.dp, accentCyan.copy(alpha = 0.4f)),
         shadowElevation = 12.dp
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -356,7 +442,7 @@ private fun OverlayWindow(
                             imageVector = Icons.Default.Close, 
                             contentDescription = "Stop All",
                             modifier = Modifier.size(20.dp),
-                            tint = com.motorider.ui.theme.NeonRed
+                            tint = accentRed
                         )
                     }
                     Spacer(Modifier.width(8.dp))
@@ -365,8 +451,16 @@ private fun OverlayWindow(
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.ExtraBold,
                         letterSpacing = 1.sp,
-                        color = com.motorider.ui.theme.NeonCyan
+                        color = accentCyan
                     )
+                    // Night mode indicator
+                    if (isNight) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "🌙",
+                            fontSize = 12.sp
+                        )
+                    }
                 }
                 
                 IconButton(
@@ -377,7 +471,7 @@ private fun OverlayWindow(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Close HUD Only",
                         modifier = Modifier.size(18.dp),
-                        tint = com.motorider.ui.theme.TextSecondary
+                        tint = textSec
                     )
                 }
             }
@@ -399,8 +493,13 @@ private fun OverlayWindow(
                     }
             ) {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    // Speed Readout — scales with overlay window size
-                    // Uses overlayWidthDp from WindowManager so it recomposes on resize
+                    // === SPEED CAMERA WARNING (shown if alerts enabled and camera nearby) ===
+                    if (showAlerts && camerasEnabled && cameraDistM != null) {
+                        PulsingCameraWarning(distanceM = cameraDistM!!, nightMode = isNight)
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    // === SPEED READOUT (always shown) ===
                     val scaledSpeedSize = (overlayWidthDp / 3.2f).coerceIn(40f, 180f).sp
                     val scaledUnitSize = (overlayWidthDp / 14f).coerceIn(10f, 32f).sp
                     val unitPadding = (overlayWidthDp / 30f).coerceIn(4f, 20f).dp
@@ -414,7 +513,7 @@ private fun OverlayWindow(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // 1. Speed Limit Sign (Now on the LEFT)
+                        // 1. Speed Limit Sign (LEFT)
                         displayRoadLimit?.let { limit ->
                             Surface(
                                 modifier = Modifier
@@ -436,148 +535,151 @@ private fun OverlayWindow(
                             Spacer(Modifier.width(20.dp))
                         }
 
-                        // 2. Current Speed (Now on the RIGHT)
+                        // 2. Current Speed (RIGHT)
                         Text(
                             text = "${displaySpeed.toInt()}",
                             style = androidx.compose.ui.text.TextStyle(
                                 fontSize = scaledSpeedSize,
                                 fontWeight = FontWeight.Black,
-                                color = com.motorider.ui.theme.NeonCyan
+                                color = accentCyan
                             )
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Divider(
-                        modifier = Modifier.fillMaxWidth(0.6f).align(Alignment.CenterHorizontally),
-                        thickness = 1.dp,
-                        color = com.motorider.ui.theme.NeonCyan.copy(alpha = 0.2f)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Media Status
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (isPlaying) {
-                                PulsingStatus()
-                                Spacer(Modifier.width(8.dp))
-                            }
-                            Text(
-                                text = selectedStation?.name ?: "NO STATION",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isPlaying) com.motorider.ui.theme.NeonGreen else com.motorider.ui.theme.TextSecondary,
-                                maxLines = 1
-                            )
-                        }
-                        
+                    // === RADIO SECTION (conditional) ===
+                    if (showRadio) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Divider(
+                            modifier = Modifier.fillMaxWidth(0.6f).align(Alignment.CenterHorizontally),
+                            thickness = 1.dp,
+                            color = accentCyan.copy(alpha = 0.2f)
+                        )
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        Row(
+                        // Media Status
+                        Column(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            val context = androidx.compose.ui.platform.LocalContext.current
-                            
-                            // Play Button
-                            Surface(
-                                onClick = {
-                                    val station = selectedStation ?: return@Surface
-                                    val intent = Intent(context, RadioPlayerService::class.java).apply {
-                                        action = RadioPlayerService.ACTION_PLAY
-                                        putExtra(RadioPlayerService.EXTRA_STATION_NAME, station.name)
-                                        putExtra(RadioPlayerService.EXTRA_STATION_URL, station.url)
-                                    }
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                        context.startForegroundService(intent)
-                                    } else {
-                                        context.startService(intent)
-                                    }
-                                    isPlaying = true
-                                },
-                                shape = androidx.compose.foundation.shape.CircleShape,
-                                color = if (isPlaying) com.motorider.ui.theme.NeonGreen.copy(alpha = 0.1f) else com.motorider.ui.theme.CardBackground,
-                                modifier = Modifier.size(44.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, if (isPlaying) com.motorider.ui.theme.NeonGreen else com.motorider.ui.theme.TextSecondary.copy(alpha = 0.5f))
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        painter = painterResource(id = android.R.drawable.ic_media_play),
-                                        contentDescription = "Play",
-                                        modifier = Modifier.size(24.dp),
-                                        tint = if (isPlaying) com.motorider.ui.theme.NeonGreen else com.motorider.ui.theme.TextPrimary
-                                    )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (isPlaying) {
+                                    PulsingStatus()
+                                    Spacer(Modifier.width(8.dp))
                                 }
-                            }
-
-                            Spacer(Modifier.width(20.dp))
-
-                            // Pause Button
-                            Surface(
-                                onClick = {
-                                    val intent = Intent(context, RadioPlayerService::class.java).apply {
-                                        action = RadioPlayerService.ACTION_PAUSE
-                                    }
-                                    context.startService(intent)
-                                    isPlaying = false
-                                },
-                                shape = androidx.compose.foundation.shape.CircleShape,
-                                color = com.motorider.ui.theme.CardBackground,
-                                modifier = Modifier.size(44.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, com.motorider.ui.theme.TextSecondary.copy(alpha = 0.5f))
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        painter = painterResource(id = android.R.drawable.ic_media_pause),
-                                        contentDescription = "Pause",
-                                        modifier = Modifier.size(24.dp),
-                                        tint = com.motorider.ui.theme.TextPrimary
-                                    )
-                                }
+                                Text(
+                                    text = selectedStation?.name ?: "NO STATION",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isPlaying) accentGreen else textSec,
+                                    maxLines = 1
+                                )
                             }
                             
-                            Spacer(Modifier.width(20.dp))
-                            
-                            // Next Station Button
-                            Surface(
-                                onClick = {
-                                    if (stations.isEmpty()) return@Surface
-                                    val currentIndex = stations.indexOfFirst { it.id == selectedId }
-                                    val nextIndex = if (currentIndex == -1) 0 else (currentIndex + 1) % stations.size
-                                    val nextStation = stations[nextIndex]
-                                    
-                                    // 1. Update selected station in settings so it reflects everywhere
-                                    settingsRepository.setSelectedStation(nextStation.id)
-                                    
-                                    // 2. Play the new station immediately
-                                    val intent = Intent(context, RadioPlayerService::class.java).apply {
-                                        action = RadioPlayerService.ACTION_PLAY
-                                        putExtra(RadioPlayerService.EXTRA_STATION_NAME, nextStation.name)
-                                        putExtra(RadioPlayerService.EXTRA_STATION_URL, nextStation.url)
-                                    }
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                        context.startForegroundService(intent)
-                                    } else {
-                                        context.startService(intent)
-                                    }
-                                    isPlaying = true
-                                },
-                                shape = androidx.compose.foundation.shape.CircleShape,
-                                color = com.motorider.ui.theme.CardBackground,
-                                modifier = Modifier.size(44.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, com.motorider.ui.theme.TextSecondary.copy(alpha = 0.5f))
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = androidx.compose.material.icons.Icons.Default.SkipNext,
-                                        contentDescription = "Next Station",
-                                        modifier = Modifier.size(24.dp),
-                                        tint = com.motorider.ui.theme.TextPrimary
-                                    )
+                                val context = androidx.compose.ui.platform.LocalContext.current
+                                
+                                // Play Button
+                                Surface(
+                                    onClick = {
+                                        val station = selectedStation ?: return@Surface
+                                        val intent = Intent(context, RadioPlayerService::class.java).apply {
+                                            action = RadioPlayerService.ACTION_PLAY
+                                            putExtra(RadioPlayerService.EXTRA_STATION_NAME, station.name)
+                                            putExtra(RadioPlayerService.EXTRA_STATION_URL, station.url)
+                                        }
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                            context.startForegroundService(intent)
+                                        } else {
+                                            context.startService(intent)
+                                        }
+                                        isPlaying = true
+                                    },
+                                    shape = androidx.compose.foundation.shape.CircleShape,
+                                    color = if (isPlaying) accentGreen.copy(alpha = 0.1f) else com.motorider.ui.theme.CardBackground,
+                                    modifier = Modifier.size(44.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isPlaying) accentGreen else textSec.copy(alpha = 0.5f))
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            painter = painterResource(id = android.R.drawable.ic_media_play),
+                                            contentDescription = "Play",
+                                            modifier = Modifier.size(24.dp),
+                                            tint = if (isPlaying) accentGreen else textMain
+                                        )
+                                    }
+                                }
+
+                                Spacer(Modifier.width(20.dp))
+
+                                // Pause Button
+                                Surface(
+                                    onClick = {
+                                        val intent = Intent(context, RadioPlayerService::class.java).apply {
+                                            action = RadioPlayerService.ACTION_PAUSE
+                                        }
+                                        context.startService(intent)
+                                        isPlaying = false
+                                    },
+                                    shape = androidx.compose.foundation.shape.CircleShape,
+                                    color = com.motorider.ui.theme.CardBackground,
+                                    modifier = Modifier.size(44.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, textSec.copy(alpha = 0.5f))
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            painter = painterResource(id = android.R.drawable.ic_media_pause),
+                                            contentDescription = "Pause",
+                                            modifier = Modifier.size(24.dp),
+                                            tint = textMain
+                                        )
+                                    }
+                                }
+                                
+                                Spacer(Modifier.width(20.dp))
+                                
+                                // Next Station Button
+                                Surface(
+                                    onClick = {
+                                        if (stations.isEmpty()) return@Surface
+                                        val currentIndex = stations.indexOfFirst { it.id == selectedId }
+                                        val nextIndex = if (currentIndex == -1) 0 else (currentIndex + 1) % stations.size
+                                        val nextStation = stations[nextIndex]
+                                        
+                                        // 1. Update selected station in settings so it reflects everywhere
+                                        settingsRepository.setSelectedStation(nextStation.id)
+                                        
+                                        // 2. Play the new station immediately
+                                        val intent = Intent(context, RadioPlayerService::class.java).apply {
+                                            action = RadioPlayerService.ACTION_PLAY
+                                            putExtra(RadioPlayerService.EXTRA_STATION_NAME, nextStation.name)
+                                            putExtra(RadioPlayerService.EXTRA_STATION_URL, nextStation.url)
+                                        }
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                            context.startForegroundService(intent)
+                                        } else {
+                                            context.startService(intent)
+                                        }
+                                        isPlaying = true
+                                    },
+                                    shape = androidx.compose.foundation.shape.CircleShape,
+                                    color = com.motorider.ui.theme.CardBackground,
+                                    modifier = Modifier.size(44.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, textSec.copy(alpha = 0.5f))
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = androidx.compose.material.icons.Icons.Default.SkipNext,
+                                            contentDescription = "Next Station",
+                                            modifier = Modifier.size(24.dp),
+                                            tint = textMain
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -603,13 +705,13 @@ private fun OverlayWindow(
                     Box(
                         modifier = Modifier
                             .size(10.dp, 2.dp)
-                            .background(com.motorider.ui.theme.NeonCyan.copy(alpha = 0.6f))
+                            .background(accentCyan.copy(alpha = 0.6f))
                             .align(Alignment.BottomEnd)
                     )
                     Box(
                         modifier = Modifier
                             .size(2.dp, 10.dp)
-                            .background(com.motorider.ui.theme.NeonCyan.copy(alpha = 0.6f))
+                            .background(accentCyan.copy(alpha = 0.6f))
                             .align(Alignment.BottomEnd)
                     )
                 }
@@ -617,4 +719,3 @@ private fun OverlayWindow(
         }
     }
 }
-

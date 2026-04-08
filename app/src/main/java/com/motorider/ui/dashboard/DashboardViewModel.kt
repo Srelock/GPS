@@ -36,6 +36,22 @@ class DashboardViewModel @Inject constructor(
     val overlayEnabled: StateFlow<Boolean> = settingsRepository.overlayEnabled
     val radioStations: StateFlow<List<SettingsRepository.RadioStation>> = settingsRepository.radioStations
     val selectedStationId: StateFlow<String?> = settingsRepository.selectedStationId
+
+    // Night mode
+    val nightModeAuto: StateFlow<Boolean> = settingsRepository.nightModeAuto
+    val nightModeForced: StateFlow<Boolean> = settingsRepository.nightModeForced
+
+    // HUD layout mode
+    val hudMode: StateFlow<SettingsRepository.HudMode> = settingsRepository.hudMode
+
+    // Speed cameras
+    val speedCamerasEnabled: StateFlow<Boolean> = settingsRepository.speedCamerasEnabled
+    val nearestCameraDistance: StateFlow<Float?> = locationRepository.nearestCameraDistance
+
+    // Routes
+    val routesJson: StateFlow<String> = settingsRepository.routesJson
+    val activeRouteId: StateFlow<String?> = settingsRepository.activeRouteId
+    val isRecordingRoute: StateFlow<Boolean> = settingsRepository.isRecordingRoute
     
     // Current state from repositories
     val currentSpeed: StateFlow<Double> = locationRepository.currentSpeed
@@ -44,12 +60,13 @@ class DashboardViewModel @Inject constructor(
     
     // Combined UI state for the dashboard
     val dashboardState: StateFlow<DashboardUiState> = combine(
-        currentSpeed, alertState, roadSpeedLimit
-    ) { speed, alert, roadLimit ->
+        currentSpeed, alertState, roadSpeedLimit, locationRepository.nearestCameraDistance
+    ) { speed, alert, roadLimit, cameraDist ->
         DashboardUiState(
             speedKmh = speed,
             alertState = alert,
-            roadSpeedLimit = roadLimit
+            roadSpeedLimit = roadLimit,
+            nearestCameraDistanceM = cameraDist
         )
     }.stateIn(
         scope = viewModelScope,
@@ -100,7 +117,38 @@ class DashboardViewModel @Inject constructor(
     fun setSelectedRadioStation(id: String?) {
         settingsRepository.setSelectedStation(id)
     }
-    
+
+    // Night mode
+    fun setNightModeAuto(enabled: Boolean) {
+        settingsRepository.setNightModeAuto(enabled)
+    }
+
+    fun setNightModeForced(forced: Boolean) {
+        settingsRepository.setNightModeForced(forced)
+    }
+
+    // HUD mode
+    fun setHudMode(mode: SettingsRepository.HudMode) {
+        settingsRepository.setHudMode(mode)
+    }
+
+    // Speed cameras
+    fun setSpeedCamerasEnabled(enabled: Boolean) {
+        settingsRepository.setSpeedCamerasEnabled(enabled)
+    }
+
+    // Routes
+    fun setRoutesJson(json: String) {
+        settingsRepository.setRoutesJson(json)
+    }
+
+    fun setActiveRouteId(id: String?) {
+        settingsRepository.setActiveRouteId(id)
+    }
+
+    fun setRecordingRoute(recording: Boolean) {
+        settingsRepository.setRecordingRoute(recording)
+    }
     
     /**
      * Announce current speed via Bluetooth audio.
@@ -126,7 +174,9 @@ class DashboardViewModel @Inject constructor(
 data class DashboardUiState(
     val speedKmh: Double = 0.0,
     val alertState: SpeedAlertState = SpeedAlertState.NORMAL,
-    val roadSpeedLimit: Double? = null
+    val roadSpeedLimit: Double? = null,
+    val nearestCameraDistanceM: Float? = null
 ) {
     val speedInt: Int get() = speedKmh.toInt()
 }
+

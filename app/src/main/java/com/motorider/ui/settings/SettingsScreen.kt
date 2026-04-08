@@ -5,7 +5,10 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -43,14 +47,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import com.motorider.data.repository.SettingsRepository
+import com.motorider.data.repository.RouteRepository
 import com.motorider.ui.dashboard.DashboardViewModel
 import com.motorider.ui.theme.CardBackground
 import com.motorider.ui.theme.DarkBackground
 import com.motorider.ui.theme.NeonCyan
 import com.motorider.ui.theme.NeonGreen
 import com.motorider.ui.theme.NeonOrange
+import com.motorider.ui.theme.NeonRed
+import com.motorider.ui.theme.NeonPurple
 import com.motorider.ui.theme.TextPrimary
 import com.motorider.ui.theme.TextSecondary
 import com.motorider.service.OverlayService
@@ -68,9 +77,25 @@ fun SettingsScreen(
     val stations by viewModel.radioStations.collectAsState()
     val selectedStationId by viewModel.selectedStationId.collectAsState()
 
+    // Night mode
+    val nightAuto by viewModel.nightModeAuto.collectAsState()
+    val nightForced by viewModel.nightModeForced.collectAsState()
+
+    // HUD mode
+    val hudMode by viewModel.hudMode.collectAsState()
+
+    // Speed cameras
+    val camerasEnabled by viewModel.speedCamerasEnabled.collectAsState()
+
+    // Routes
+    val routesJson by viewModel.routesJson.collectAsState()
+    val activeRouteId by viewModel.activeRouteId.collectAsState()
+    val isRecording by viewModel.isRecordingRoute.collectAsState()
+
     val context = LocalContext.current
     var newStationName by remember { mutableStateOf("") }
     var newStationUrl by remember { mutableStateOf("") }
+    var newRouteName by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -96,9 +121,266 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            // Speed Limit Alert removed as requested
+            // ===== NIGHT MODE =====
+            SettingCard(title = "Night Mode") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Auto (sunset/sunrise)",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Dims HUD between 7pm–6am",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                    Switch(
+                        checked = nightAuto,
+                        onCheckedChange = { viewModel.setNightModeAuto(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = NeonPurple,
+                            checkedTrackColor = CardBackground,
+                            uncheckedThumbColor = TextSecondary,
+                            uncheckedTrackColor = CardBackground
+                        )
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Force night mode",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Always use dimmed colours",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                    Switch(
+                        checked = nightForced,
+                        onCheckedChange = { viewModel.setNightModeForced(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = NeonPurple,
+                            checkedTrackColor = CardBackground,
+                            uncheckedThumbColor = TextSecondary,
+                            uncheckedTrackColor = CardBackground
+                        )
+                    )
+                }
+            }
 
-            // Haptic Feedback Setting
+            // ===== HUD LAYOUT MODE =====
+            SettingCard(title = "HUD Layout") {
+                Text(
+                    text = "Choose what shows on the floating bubble",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SettingsRepository.HudMode.entries.forEach { mode ->
+                        val isSelected = hudMode == mode
+                        val borderColor = if (isSelected) NeonCyan else TextSecondary.copy(alpha = 0.3f)
+                        val bgColor = if (isSelected) NeonCyan.copy(alpha = 0.1f) else CardBackground
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(bgColor)
+                                .border(1.dp, borderColor, RoundedCornerShape(12.dp))
+                                .clickable { viewModel.setHudMode(mode) }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text(
+                                    text = mode.label,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected) NeonCyan else TextPrimary
+                                )
+                                Text(
+                                    text = when (mode) {
+                                        SettingsRepository.HudMode.SPEED_ONLY -> "Just speed – minimal distraction"
+                                        SettingsRepository.HudMode.SPEED_RADIO -> "Speed + radio controls"
+                                        SettingsRepository.HudMode.SPEED_ALERTS -> "Speed + camera warnings"
+                                        SettingsRepository.HudMode.FULL_HUD -> "Everything: speed, radio, cameras"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary
+                                )
+                            }
+                            if (isSelected) {
+                                Text("✓", color = NeonCyan, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ===== SPEED CAMERAS =====
+            SettingCard(title = "Speed Camera Alerts") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Camera warnings",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Alerts at 500m (visual) and 300m (pulse)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                    Switch(
+                        checked = camerasEnabled,
+                        onCheckedChange = { viewModel.setSpeedCamerasEnabled(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = NeonRed,
+                            checkedTrackColor = CardBackground,
+                            uncheckedThumbColor = TextSecondary,
+                            uncheckedTrackColor = CardBackground
+                        )
+                    )
+                }
+            }
+
+            // ===== FAVOURITE ROUTES =====
+            SettingCard(title = "Favourite Routes") {
+                Text(
+                    text = "Save your commute for instant camera alerts",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Recording controls
+                if (isRecording) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = newRouteName,
+                            onValueChange = { newRouteName = it },
+                            label = { Text("Route name") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        Button(
+                            onClick = {
+                                if (newRouteName.isNotBlank()) {
+                                    viewModel.setRecordingRoute(false)
+                                    // Save will be handled externally
+                                    newRouteName = ""
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = NeonGreen)
+                        ) { Text("Save", color = DarkBackground) }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            viewModel.setRecordingRoute(false)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonRed),
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Cancel Recording", color = TextPrimary) }
+                } else {
+                    Button(
+                        onClick = {
+                            viewModel.setRecordingRoute(true)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonOrange)
+                    ) { Text("🔴 Start Recording Route", color = DarkBackground) }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Saved routes list
+                val routes = try {
+                    val arr = org.json.JSONArray(routesJson)
+                    buildList {
+                        for (i in 0 until arr.length()) {
+                            val obj = arr.optJSONObject(i) ?: continue
+                            add(Triple(
+                                obj.optString("id", ""),
+                                obj.optString("name", "?"),
+                                obj.optInt("waypoints", 0)
+                            ))
+                        }
+                    }
+                } catch (_: Exception) { emptyList() }
+
+                if (routes.isEmpty()) {
+                    Text(
+                        text = "No routes saved yet.\nStart a recording while riding your commute.",
+                        color = TextSecondary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    Text(
+                        text = "Saved routes (${routes.size}/5)",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = TextSecondary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    routes.forEach { (id, name, _) ->
+                        val isActive = activeRouteId == id
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isActive) NeonCyan.copy(alpha = 0.1f) else CardBackground)
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(name, color = TextPrimary, fontWeight = FontWeight.Bold)
+                                if (isActive) {
+                                    Text("Active – cameras pre-loaded", color = NeonCyan,
+                                        style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Button(
+                                    onClick = {
+                                        viewModel.setActiveRouteId(if (isActive) null else id)
+                                    }
+                                ) { Text(if (isActive) "Deselect" else "Set Active") }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+            }
+
+            // ===== HAPTIC FEEDBACK =====
             SettingCard(title = "Haptic Feedback") {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -135,7 +417,7 @@ fun SettingsScreen(
                 }
             }
 
-            // Floating Overlay + Radio
+            // ===== FLOATING OVERLAY + RADIO =====
             SettingCard(title = "Floating overlay + radio") {
                 val hasOverlayPermission = Settings.canDrawOverlays(context)
                 val selectedStation = stations.firstOrNull { it.id == selectedStationId } ?: stations.firstOrNull()
@@ -155,7 +437,7 @@ fun SettingsScreen(
                             text = if (hasOverlayPermission) {
                                 "Permission granted"
                             } else {
-                                "Needs “Display over other apps” permission"
+                                "Needs \u201cDisplay over other apps\u201d permission"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
@@ -315,7 +597,7 @@ fun SettingsScreen(
                 }
             }
 
-            // Units Setting
+            // ===== UNITS =====
             SettingCard(title = "Units") {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

@@ -12,8 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
@@ -38,7 +37,13 @@ import com.motorider.ui.dashboard.components.Speedometer
 import androidx.compose.material.icons.filled.Close
 import com.motorider.ui.theme.DarkBackground
 import com.motorider.ui.theme.NeonCyan
+import com.motorider.ui.theme.NeonCyanDim
+import com.motorider.ui.theme.NeonRedDim
+import com.motorider.ui.theme.TextPrimary
+import com.motorider.ui.theme.TextPrimaryDim
 import com.motorider.ui.theme.TextSecondary
+import com.motorider.ui.theme.TextSecondaryDim
+import java.util.Calendar
 
 /**
  * Main dashboard screen for motorcycle riders.
@@ -58,6 +63,19 @@ fun DashboardScreen(
     val state by viewModel.dashboardState.collectAsState()
     val speedLimit by viewModel.speedLimit.collectAsState()
     val useMph by viewModel.useMph.collectAsState()
+
+    // Night mode
+    val nightAuto by viewModel.nightModeAuto.collectAsState()
+    val nightForced by viewModel.nightModeForced.collectAsState()
+    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    val isNight = nightForced || (nightAuto && (hour >= 19 || hour < 6))
+
+    // Speed cameras
+    val camerasEnabled by viewModel.speedCamerasEnabled.collectAsState()
+
+    val accentCyan = if (isNight) NeonCyanDim else NeonCyan
+    val accentRed = if (isNight) NeonRedDim else NeonRed
+    val textSec = if (isNight) TextSecondaryDim else TextSecondary
     
     Box(
         modifier = Modifier
@@ -74,8 +92,46 @@ fun DashboardScreen(
             // Top action bar
             TopActionBar(
                 onSettingsClick = onNavigateToSettings,
-                onAnnounceClick = { viewModel.announceSpeed() }
+                onAnnounceClick = { viewModel.announceSpeed() },
+                accentCyan = accentCyan,
+                accentRed = accentRed,
+                textSec = textSec
             )
+
+            // Camera warning banner (above speedometer)
+            if (camerasEnabled && state.nearestCameraDistanceM != null) {
+                val dist = state.nearestCameraDistanceM!!
+                val infiniteTransition = rememberInfiniteTransition(label = "dashCamPulse")
+                val pulseAlpha by infiniteTransition.animateFloat(
+                    initialValue = 0.5f,
+                    targetValue = 1.0f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(if (dist < 300f) 400 else 800),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "dashCameraAlpha"
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .alpha(pulseAlpha)
+                        .background(accentRed.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "⚠ SPEED CAMERA — ${dist.toInt()}m ahead",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (isNight) TextPrimaryDim else TextPrimary,
+                        letterSpacing = 1.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
             
             // Speedometer centered in the remaining space
             Box(
@@ -101,7 +157,10 @@ fun DashboardScreen(
 @Composable
 private fun TopActionBar(
     onSettingsClick: () -> Unit,
-    onAnnounceClick: () -> Unit
+    onAnnounceClick: () -> Unit,
+    accentCyan: androidx.compose.ui.graphics.Color = NeonCyan,
+    accentRed: androidx.compose.ui.graphics.Color = NeonRed,
+    textSec: androidx.compose.ui.graphics.Color = TextSecondary
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     
@@ -133,7 +192,7 @@ private fun TopActionBar(
             Icon(
                 imageVector = Icons.Default.Close,
                 contentDescription = "Quit App",
-                tint = NeonRed,
+                tint = accentRed,
                 modifier = Modifier.size(28.dp)
             )
         }
@@ -146,7 +205,7 @@ private fun TopActionBar(
             Icon(
                 imageVector = Icons.Default.VolumeUp,
                 contentDescription = "Announce Speed",
-                tint = NeonCyan,
+                tint = accentCyan,
                 modifier = Modifier.size(28.dp)
             )
         }
@@ -159,9 +218,10 @@ private fun TopActionBar(
             Icon(
                 imageVector = Icons.Default.Settings,
                 contentDescription = "Settings",
-                tint = TextSecondary,
+                tint = textSec,
                 modifier = Modifier.size(28.dp)
             )
         }
     }
 }
+

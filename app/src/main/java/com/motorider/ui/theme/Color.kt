@@ -41,3 +41,13 @@ val BorderDefault = Color(0xFF404040)
 val DividerColor = Color(0xFF303030)
 val GlowGreen = Color(0x4039FF14)       // Subtle glow effect
 val GlowRed = Color(0x40FF073A)         // Warning glow effect
+
+// Night Mode — Dimmed variants (approx 40% brightness)
+val NeonGreenDim = Color(0xFF1A7A0A)
+val NeonYellowDim = Color(0xFF7A7A00)
+val NeonOrangeDim = Color(0xFF7A3300)
+val NeonRedDim = Color(0xFF7A041D)
+val NeonCyanDim = Color(0xFF007A7A)
+val NeonPurpleDim = Color(0xFF5C007A)
+val TextPrimaryDim = Color(0xFF999999)
+val TextSecondaryDim = Color(0xFF666666)
