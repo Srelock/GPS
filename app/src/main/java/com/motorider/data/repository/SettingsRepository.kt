@@ -204,9 +204,14 @@ class SettingsRepository @Inject constructor(
     private fun decodeStations(raw: String?): List<RadioStation> {
         val defaultStations = listOf(
             RadioStation("capital_fm", "Capital FM", "https://media-ssl.musicradio.com/CapitalMP3"),
+            RadioStation("capital_dance", "Capital Dance", "https://media-ssl.musicradio.com/CapitalDanceMP3"),
+            RadioStation("kiss_fm", "Kiss FM", "https://stream-mz.planetradio.co.uk/kissnational.mp3"),
+            RadioStation("heart_dance", "Heart Dance", "https://media-ssl.musicradio.com/HeartDanceMP3"),
+            RadioStation("planet_rock", "Planet Rock", "https://stream-mz.planetradio.co.uk/planetrock.mp3"),
+            RadioStation("absolute_radio", "Absolute Radio", "https://stream-mz.planetradio.co.uk/absoluteradio.mp3"),
+            RadioStation("radio_x_uk", "Radio X", "https://media-ssl.musicradio.com/RadioXUKMP3"),
             RadioStation("heart_london", "Heart London", "https://media-ssl.musicradio.com/HeartLondonMP3"),
             RadioStation("lbc_london", "LBC London", "https://media-ssl.musicradio.com/LBCLondonMP3"),
-            RadioStation("radio_x_uk", "Radio X", "https://media-ssl.musicradio.com/RadioXUKMP3"),
             RadioStation("smooth_london", "Smooth London", "https://media-ssl.musicradio.com/SmoothLondonMP3")
         )
 
