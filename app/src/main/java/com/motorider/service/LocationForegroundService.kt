@@ -95,7 +95,15 @@ class LocationForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Satisfaction of Android's foreground service requirement MUST happen immediately
         val startNotification = createNotification("Starting tracking...")
-        startForeground(NOTIFICATION_ID, startNotification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID, 
+                startNotification, 
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, startNotification)
+        }
         
         when (intent?.action) {
             ACTION_START -> {
@@ -144,19 +152,24 @@ class LocationForegroundService : Service() {
         stalledCheckJob?.cancel()
         stalledCheckJob = serviceScope.launch {
             while (true) {
-                kotlinx.coroutines.delay(5000)
+                kotlinx.coroutines.delay(10000) // Check every 10s
                 val now = System.currentTimeMillis()
                 
                 if (lastLocationTime > 0) {
-                    // We had a location, but it stopped (6s gap)
-                    if (now - lastLocationTime > 6000) {
+                    // We had a location, but it stopped (30s gap)
+                    // 30s is more reasonable for GPS gaps (tunnels, etc.)
+                    if (now - lastLocationTime > 30000) {
+                        android.util.Log.w("LocationService", "GPS stalled for 30s, restarting...")
                         launchLocationJob()
                     }
-                } else if (now - serviceStartTime > 15000) {
-                    // Never received a location within 15s of service start
-                    // Refresh the start time and restart the job
-                    serviceStartTime = now
-                    launchLocationJob()
+                } else {
+                    // Never received a location since service start or restart
+                    val timeSinceStart = now - serviceStartTime
+                    if (timeSinceStart > 30000) {
+                        android.util.Log.w("LocationService", "No GPS fix after 30s, retrying...")
+                        serviceStartTime = now // Reset start time to give it another 30s
+                        launchLocationJob()
+                    }
                 }
             }
         }
@@ -234,6 +247,12 @@ class LocationForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         
+        val stopIntent = Intent(this, LocationForegroundService::class.java).apply { action = ACTION_STOP }
+        val stopPendingIntent = PendingIntent.getService(
+            this, 1, stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.notification_title))
             .setContentText(contentText)
@@ -242,6 +261,7 @@ class LocationForegroundService : Service() {
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Ride", stopPendingIntent)
             .build()
     }
     

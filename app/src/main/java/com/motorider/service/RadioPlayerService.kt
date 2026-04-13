@@ -14,11 +14,19 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.motorider.MainActivity
 import com.motorider.R
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.net.URL
 
 class RadioPlayerService : Service() {
 
     private var player: ExoPlayer? = null
     private var lastTitle: String = "Radio stopped"
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     companion object {
         private const val NOTIFICATION_ID = 3001
@@ -80,21 +88,54 @@ class RadioPlayerService : Service() {
 
     private fun play(name: String, url: String) {
         ensurePlayer()
-        lastTitle = "Playing: $name"
+        lastTitle = "Loading: $name"
+        updateNotification()
 
-        val mediaItem = MediaItem.Builder()
-            .setUri(url)
-            .setMediaId(url)
-            .setTag(name)
-            .build()
+        serviceScope.launch {
+            val resolvedUrl = resolveStreamUrl(url) ?: url
 
-        player?.apply {
-            setMediaItem(mediaItem)
-            prepare()
-            playWhenReady = true
+            lastTitle = "Playing: $name"
+
+            val mediaItem = MediaItem.Builder()
+                .setUri(resolvedUrl)
+                .setMediaId(resolvedUrl)
+                .setTag(name)
+                .build()
+
+            player?.apply {
+                setMediaItem(mediaItem)
+                prepare()
+                playWhenReady = true
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    createNotification(),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, createNotification())
+            }
         }
+    }
 
-        startForeground(NOTIFICATION_ID, createNotification())
+    private suspend fun resolveStreamUrl(url: String): String? {
+        // Some stations provide short-lived tokenized stream URLs via .pls playlists.
+        val looksLikePls = url.contains(".pls", ignoreCase = true) || url.contains("playlists/", ignoreCase = true)
+        if (!looksLikePls) return null
+
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val text = URL(url).readText()
+                val file1 = text.lineSequence()
+                    .map { it.trim() }
+                    .firstOrNull { it.startsWith("File1=", ignoreCase = true) }
+                    ?.substringAfter("=", missingDelimiterValue = "")
+                    ?.trim()
+                file1?.takeIf { it.startsWith("http", ignoreCase = true) }
+            }.getOrNull()
+        }
     }
 
     private fun pause() {
@@ -187,6 +228,7 @@ class RadioPlayerService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        serviceScope.cancel()
         player?.release()
         player = null
     }

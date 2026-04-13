@@ -50,7 +50,6 @@ import com.motorider.data.repository.SettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import java.util.Calendar
 import javax.inject.Inject
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -114,7 +113,15 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
             return
         }
 
-        startForeground(NOTIFICATION_ID, createNotification("Overlay running"))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID, 
+                createNotification("Overlay running"),
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, createNotification("Overlay running"))
+        }
 
         val density = resources.displayMetrics.density
         // Fetch logical (DP) values and convert to Pixels
@@ -272,15 +279,6 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
     }
 }
 
-/**
- * Simple night mode check based on time of day.
- * Returns true if it's between 7pm and 6am (dark hours in London).
- */
-private fun isNightTime(): Boolean {
-    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-    return hour >= 19 || hour < 6
-}
-
 @Composable
 private fun PulsingStatus() {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -306,7 +304,7 @@ private fun PulsingStatus() {
  * Pulsing camera warning icon.
  */
 @Composable
-private fun PulsingCameraWarning(distanceM: Float, nightMode: Boolean) {
+private fun PulsingCameraWarning(distanceM: Float) {
     val infiniteTransition = rememberInfiniteTransition(label = "cameraPulse")
 
     // Pulse faster when closer
@@ -321,8 +319,8 @@ private fun PulsingCameraWarning(distanceM: Float, nightMode: Boolean) {
         label = "cameraAlpha"
     )
 
-    val warnColor = if (nightMode) com.motorider.ui.theme.NeonRedDim else com.motorider.ui.theme.NeonRed
-    val textColor = if (nightMode) com.motorider.ui.theme.TextPrimaryDim else com.motorider.ui.theme.TextPrimary
+    val warnColor = com.motorider.ui.theme.NeonRed
+    val textColor = com.motorider.ui.theme.TextPrimary
 
     Row(
         modifier = Modifier
@@ -368,11 +366,6 @@ private fun OverlayWindow(
     val selectedId by settingsRepository.selectedStationId.collectAsState()
     val selectedStation = stations.firstOrNull { it.id == selectedId } ?: stations.firstOrNull()
 
-    // Night mode
-    val nightAuto by settingsRepository.nightModeAuto.collectAsState()
-    val nightForced by settingsRepository.nightModeForced.collectAsState()
-    val isNight = nightForced || (nightAuto && isNightTime())
-
     // HUD mode
     val hudMode by settingsRepository.hudMode.collectAsState()
 
@@ -389,13 +382,13 @@ private fun OverlayWindow(
     // Real-time playing state check via Service (rough proxy)
     var isPlaying by remember { mutableStateOf(false) }
 
-    // Night mode colour selection
-    val bgAlpha = if (isNight) 0.50f else 0.85f
-    val accentCyan = if (isNight) com.motorider.ui.theme.NeonCyanDim else com.motorider.ui.theme.NeonCyan
-    val accentGreen = if (isNight) com.motorider.ui.theme.NeonGreenDim else com.motorider.ui.theme.NeonGreen
-    val accentRed = if (isNight) com.motorider.ui.theme.NeonRedDim else com.motorider.ui.theme.NeonRed
-    val textMain = if (isNight) com.motorider.ui.theme.TextPrimaryDim else com.motorider.ui.theme.TextPrimary
-    val textSec = if (isNight) com.motorider.ui.theme.TextSecondaryDim else com.motorider.ui.theme.TextSecondary
+    // Fixed styling (night mode removed). Keep overlay opaque to avoid blending with background.
+    val bgAlpha = 1.0f
+    val accentCyan = com.motorider.ui.theme.NeonCyan
+    val accentGreen = com.motorider.ui.theme.NeonGreen
+    val accentRed = com.motorider.ui.theme.NeonRed
+    val textMain = com.motorider.ui.theme.TextPrimary
+    val textSec = com.motorider.ui.theme.TextSecondary
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -453,14 +446,6 @@ private fun OverlayWindow(
                         letterSpacing = 1.sp,
                         color = accentCyan
                     )
-                    // Night mode indicator
-                    if (isNight) {
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = "🌙",
-                            fontSize = 12.sp
-                        )
-                    }
                 }
                 
                 IconButton(
@@ -495,7 +480,7 @@ private fun OverlayWindow(
                 Column(modifier = Modifier.fillMaxSize()) {
                     // === SPEED CAMERA WARNING (shown if alerts enabled and camera nearby) ===
                     if (showAlerts && camerasEnabled && cameraDistM != null) {
-                        PulsingCameraWarning(distanceM = cameraDistM!!, nightMode = isNight)
+                        PulsingCameraWarning(distanceM = cameraDistM!!)
                         Spacer(modifier = Modifier.height(8.dp))
                     }
 

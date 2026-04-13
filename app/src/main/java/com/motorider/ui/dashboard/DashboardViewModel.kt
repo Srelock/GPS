@@ -37,15 +37,12 @@ class DashboardViewModel @Inject constructor(
     val radioStations: StateFlow<List<SettingsRepository.RadioStation>> = settingsRepository.radioStations
     val selectedStationId: StateFlow<String?> = settingsRepository.selectedStationId
 
-    // Night mode
-    val nightModeAuto: StateFlow<Boolean> = settingsRepository.nightModeAuto
-    val nightModeForced: StateFlow<Boolean> = settingsRepository.nightModeForced
-
     // HUD layout mode
     val hudMode: StateFlow<SettingsRepository.HudMode> = settingsRepository.hudMode
 
     // Speed cameras
     val speedCamerasEnabled: StateFlow<Boolean> = settingsRepository.speedCamerasEnabled
+    val speedCameraAlertDistance: StateFlow<Double> = settingsRepository.speedCameraAlertDistance
     val nearestCameraDistance: StateFlow<Float?> = locationRepository.nearestCameraDistance
 
     // Routes
@@ -75,7 +72,8 @@ class DashboardViewModel @Inject constructor(
     )
     
     init {
-        // Initial setup if needed
+        // Apply user's request for 300m alert distance
+        setSpeedCameraAlertDistance(300.0)
     }
     
     /**
@@ -118,15 +116,6 @@ class DashboardViewModel @Inject constructor(
         settingsRepository.setSelectedStation(id)
     }
 
-    // Night mode
-    fun setNightModeAuto(enabled: Boolean) {
-        settingsRepository.setNightModeAuto(enabled)
-    }
-
-    fun setNightModeForced(forced: Boolean) {
-        settingsRepository.setNightModeForced(forced)
-    }
-
     // HUD mode
     fun setHudMode(mode: SettingsRepository.HudMode) {
         settingsRepository.setHudMode(mode)
@@ -135,6 +124,10 @@ class DashboardViewModel @Inject constructor(
     // Speed cameras
     fun setSpeedCamerasEnabled(enabled: Boolean) {
         settingsRepository.setSpeedCamerasEnabled(enabled)
+    }
+
+    fun setSpeedCameraAlertDistance(distanceM: Double) {
+        settingsRepository.setSpeedCameraAlertDistance(distanceM)
     }
 
     // Routes

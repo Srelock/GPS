@@ -179,13 +179,5 @@ class MainActivity : ComponentActivity() {
         }
     }
     
-    override fun onDestroy() {
-        super.onDestroy()
-        if (isFinishing) {
-            val serviceIntent = Intent(this, LocationForegroundService::class.java).apply {
-                action = LocationForegroundService.ACTION_STOP
-            }
-            startService(serviceIntent)
-        }
-    }
+    // Removed onDestroy stopSelf logic to allow background measurement during overlay use
 }

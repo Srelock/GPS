@@ -37,13 +37,8 @@ import com.motorider.ui.dashboard.components.Speedometer
 import androidx.compose.material.icons.filled.Close
 import com.motorider.ui.theme.DarkBackground
 import com.motorider.ui.theme.NeonCyan
-import com.motorider.ui.theme.NeonCyanDim
-import com.motorider.ui.theme.NeonRedDim
 import com.motorider.ui.theme.TextPrimary
-import com.motorider.ui.theme.TextPrimaryDim
 import com.motorider.ui.theme.TextSecondary
-import com.motorider.ui.theme.TextSecondaryDim
-import java.util.Calendar
 
 /**
  * Main dashboard screen for motorcycle riders.
@@ -64,18 +59,12 @@ fun DashboardScreen(
     val speedLimit by viewModel.speedLimit.collectAsState()
     val useMph by viewModel.useMph.collectAsState()
 
-    // Night mode
-    val nightAuto by viewModel.nightModeAuto.collectAsState()
-    val nightForced by viewModel.nightModeForced.collectAsState()
-    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-    val isNight = nightForced || (nightAuto && (hour >= 19 || hour < 6))
-
     // Speed cameras
     val camerasEnabled by viewModel.speedCamerasEnabled.collectAsState()
 
-    val accentCyan = if (isNight) NeonCyanDim else NeonCyan
-    val accentRed = if (isNight) NeonRedDim else NeonRed
-    val textSec = if (isNight) TextSecondaryDim else TextSecondary
+    val accentCyan = NeonCyan
+    val accentRed = NeonRed
+    val textSec = TextSecondary
     
     Box(
         modifier = Modifier
@@ -126,7 +115,7 @@ fun DashboardScreen(
                         text = "⚠ SPEED CAMERA — ${dist.toInt()}m ahead",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.ExtraBold,
-                        color = if (isNight) TextPrimaryDim else TextPrimary,
+                        color = TextPrimary,
                         letterSpacing = 1.sp
                     )
                 }

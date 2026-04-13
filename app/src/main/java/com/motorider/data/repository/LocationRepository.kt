@@ -28,7 +28,8 @@ class LocationRepository @Inject constructor(
     private val fusedLocationClient: FusedLocationProviderClient,
     private val roadSpeedRepository: RoadSpeedRepository,
     private val speedCameraRepository: SpeedCameraRepository,
-    private val routeRepository: RouteRepository
+    private val routeRepository: RouteRepository,
+    private val settingsRepository: SettingsRepository
 ) {
     private val _currentLocation = MutableStateFlow<Location?>(null)
     val currentLocation: StateFlow<Location?> = _currentLocation.asStateFlow()
@@ -73,11 +74,13 @@ class LocationRepository @Inject constructor(
         
         val locationRequest = LocationRequest.Builder(priority, INTERVAL_MOVING_MS)
             .setMinUpdateIntervalMillis(INTERVAL_MOVING_MS / 2)
+            .setMaxUpdateDelayMillis(INTERVAL_MOVING_MS)
             .build()
         
         val callback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                result.lastLocation?.let { location ->
+                val location = result.lastLocation
+                if (location != null) {
                     _currentLocation.value = location
                     
                     val speedKmh = if (location.hasSpeed()) location.speed * 3.6 else 0.0
@@ -89,14 +92,27 @@ class LocationRepository @Inject constructor(
                     checkAndFetchCameras(location)
                     checkCameraProximity(location)
                     recordRoutePoint(location)
+                    
                     trySend(location)
+                }
+            }
+
+            override fun onLocationAvailability(availability: com.google.android.gms.location.LocationAvailability) {
+                if (!availability.isLocationAvailable) {
+                    android.util.Log.w("LocationRepository", "Location is currently unavailable")
                 }
             }
         }
         
+        android.util.Log.d("LocationRepository", "Requesting location updates (priority=$priority)")
         fusedLocationClient.requestLocationUpdates(locationRequest, callback, Looper.getMainLooper())
+            .addOnFailureListener { e ->
+                android.util.Log.e("LocationRepository", "Failed to request location updates", e)
+                close(e)
+            }
         
         awaitClose {
+            android.util.Log.d("LocationRepository", "Stopping location updates")
             fusedLocationClient.removeLocationUpdates(callback)
         }
     }
@@ -138,8 +154,9 @@ class LocationRepository @Inject constructor(
         val nearest = speedCameraRepository.findNearestCamera(
             location.latitude, location.longitude
         )
+        val alertRange = settingsRepository.speedCameraAlertDistance.value.toFloat()
         _nearestCameraDistance.value = nearest?.let { (_, dist) ->
-            if (dist <= CAMERA_ALERT_RANGE_M) dist else null
+            if (dist <= alertRange) dist else null
         }
     }
 

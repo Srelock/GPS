@@ -77,10 +77,6 @@ fun SettingsScreen(
     val stations by viewModel.radioStations.collectAsState()
     val selectedStationId by viewModel.selectedStationId.collectAsState()
 
-    // Night mode
-    val nightAuto by viewModel.nightModeAuto.collectAsState()
-    val nightForced by viewModel.nightModeForced.collectAsState()
-
     // HUD mode
     val hudMode by viewModel.hudMode.collectAsState()
 
@@ -121,67 +117,6 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            // ===== NIGHT MODE =====
-            SettingCard(title = "Night Mode") {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Auto (sunset/sunrise)",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextPrimary
-                        )
-                        Text(
-                            text = "Dims HUD between 7pm–6am",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary
-                        )
-                    }
-                    Switch(
-                        checked = nightAuto,
-                        onCheckedChange = { viewModel.setNightModeAuto(it) },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = NeonPurple,
-                            checkedTrackColor = CardBackground,
-                            uncheckedThumbColor = TextSecondary,
-                            uncheckedTrackColor = CardBackground
-                        )
-                    )
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Force night mode",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextPrimary
-                        )
-                        Text(
-                            text = "Always use dimmed colours",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary
-                        )
-                    }
-                    Switch(
-                        checked = nightForced,
-                        onCheckedChange = { viewModel.setNightModeForced(it) },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = NeonPurple,
-                            checkedTrackColor = CardBackground,
-                            uncheckedThumbColor = TextSecondary,
-                            uncheckedTrackColor = CardBackground
-                        )
-                    )
-                }
-            }
-
             // ===== HUD LAYOUT MODE =====
             SettingCard(title = "HUD Layout") {
                 Text(

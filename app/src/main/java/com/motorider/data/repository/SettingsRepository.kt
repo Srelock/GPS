@@ -64,10 +64,6 @@ class SettingsRepository @Inject constructor(
         val RADIO_STATIONS_JSON = stringPreferencesKey("radio_stations_json")
         val SELECTED_STATION_ID = stringPreferencesKey("selected_station_id")
 
-        // Night mode
-        val NIGHT_MODE_AUTO = booleanPreferencesKey("night_mode_auto")
-        val NIGHT_MODE_FORCED = booleanPreferencesKey("night_mode_forced")
-
         // HUD layout mode
         val HUD_MODE = stringPreferencesKey("hud_mode")
 
@@ -78,6 +74,7 @@ class SettingsRepository @Inject constructor(
 
         // Speed camera alerts
         val SPEED_CAMERAS_ENABLED = booleanPreferencesKey("speed_cameras_enabled")
+        val SPEED_CAMERA_ALERT_DISTANCE = doublePreferencesKey("speed_camera_alert_distance")
     }
 
     // Default 120 km/h
@@ -144,19 +141,6 @@ class SettingsRepository @Inject constructor(
         }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
-    // Night mode settings
-    val nightModeAuto: StateFlow<Boolean> = context.dataStore.data
-        .map { preferences ->
-            preferences[PreferencesKeys.NIGHT_MODE_AUTO] ?: true
-        }
-        .stateIn(scope, SharingStarted.Eagerly, true)
-
-    val nightModeForced: StateFlow<Boolean> = context.dataStore.data
-        .map { preferences ->
-            preferences[PreferencesKeys.NIGHT_MODE_FORCED] ?: false
-        }
-        .stateIn(scope, SharingStarted.Eagerly, false)
-
     // HUD layout mode
     val hudMode: StateFlow<HudMode> = context.dataStore.data
         .map { preferences ->
@@ -165,12 +149,17 @@ class SettingsRepository @Inject constructor(
         }
         .stateIn(scope, SharingStarted.Eagerly, HudMode.SPEED_RADIO)
 
-    // Speed camera alerts enabled
     val speedCamerasEnabled: StateFlow<Boolean> = context.dataStore.data
         .map { preferences ->
             preferences[PreferencesKeys.SPEED_CAMERAS_ENABLED] ?: true
         }
         .stateIn(scope, SharingStarted.Eagerly, true)
+
+    val speedCameraAlertDistance: StateFlow<Double> = context.dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.SPEED_CAMERA_ALERT_DISTANCE] ?: 500.0
+        }
+        .stateIn(scope, SharingStarted.Eagerly, 500.0)
 
     // Favourite routes
     val routesJson: StateFlow<String> = context.dataStore.data
@@ -273,19 +262,6 @@ class SettingsRepository @Inject constructor(
         }
     }
 
-    // Night mode setters
-    fun setNightModeAuto(enabled: Boolean) {
-        scope.launch {
-            context.dataStore.edit { it[PreferencesKeys.NIGHT_MODE_AUTO] = enabled }
-        }
-    }
-
-    fun setNightModeForced(forced: Boolean) {
-        scope.launch {
-            context.dataStore.edit { it[PreferencesKeys.NIGHT_MODE_FORCED] = forced }
-        }
-    }
-
     // HUD mode setter
     fun setHudMode(mode: HudMode) {
         scope.launch {
@@ -323,10 +299,12 @@ class SettingsRepository @Inject constructor(
     }
 
     private fun decodeStations(raw: String?): List<RadioStation> {
+        val kissPls = "http://www.radiofeeds.net/playlists/bauer.pls?station=kissnational-mp3"
         val defaultStations = listOf(
             RadioStation("capital_fm", "Capital FM", "https://media-ssl.musicradio.com/CapitalMP3"),
             RadioStation("capital_dance", "Capital Dance", "https://media-ssl.musicradio.com/CapitalDanceMP3"),
-            RadioStation("kiss_fm", "Kiss FM", "https://live-bauerkiss.sharp-stream.com/kissnational.aac"),
+            // Sharp-stream endpoints often require short-lived tokens; use a playlist that resolves to a fresh URL.
+            RadioStation("kiss_fm", "Kiss FM", kissPls),
             RadioStation("heart_dance", "Heart Dance", "https://media-ssl.musicradio.com/HeartDanceMP3"),
             RadioStation("planet_rock", "Planet Rock", "https://stream-mz.hellorayo.co.uk/planetrock.aac"),
             RadioStation("absolute_radio", "Absolute Radio", "https://stream-ar.hellorayo.co.uk/absoluteradiohigh.aac"),
@@ -340,7 +318,7 @@ class SettingsRepository @Inject constructor(
         if (raw == null) return defaultStations
         if (raw.isBlank()) return emptyList()
 
-        return try {
+        val parsed = try {
             val arr = JSONArray(raw)
             buildList {
                 for (i in 0 until arr.length()) {
@@ -356,6 +334,15 @@ class SettingsRepository @Inject constructor(
         } catch (_: Exception) {
             defaultStations
         }
+
+        // Lightweight migration: replace known-broken Kiss URL(s) with the playlist resolver.
+        return parsed.map { s ->
+            if (s.id == "kiss_fm" && (s.url.contains("sharp-stream.com/kissnational") || s.url.contains("planetradio.co.uk/kissnational"))) {
+                s.copy(url = kissPls)
+            } else {
+                s
+            }
+        }
     }
 
     private fun encodeStations(stations: List<RadioStation>): String {
@@ -368,5 +355,12 @@ class SettingsRepository @Inject constructor(
             arr.put(obj)
         }
         return arr.toString()
+    }
+    fun setSpeedCameraAlertDistance(distanceM: Double) {
+        scope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[PreferencesKeys.SPEED_CAMERA_ALERT_DISTANCE] = distanceM
+            }
+        }
     }
 }
