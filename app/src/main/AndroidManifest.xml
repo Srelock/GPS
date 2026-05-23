@@ -43,7 +43,7 @@
         android:theme="@style/Theme.MotoRider"
         android:usesCleartextTraffic="true"
         android:testOnly="false"
-        tools:targetApi="34">
+        tools:targetApi="36">
 
         <activity
             android:name=".MainActivity"
@@ -79,7 +79,20 @@
             android:name=".service.RadioPlayerService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name="androidx.media.session.MediaButtonReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
 
         <!-- File Provider for GPX export -->
         <provider

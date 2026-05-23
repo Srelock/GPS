@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.location.Location
 import android.os.Binder
 import android.os.Build
@@ -60,12 +61,10 @@ class LocationForegroundService : Service() {
     private var speedLimitKmh: Double = 120.0
     private var enableHapticAlerts: Boolean = true
     
-    private var lastLocation: Location? = null
-    
     companion object {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "motorider_location_channel"
-        
+
         // Actions
         const val ACTION_START = "com.motorider.action.START"
         const val ACTION_STOP = "com.motorider.action.STOP"
@@ -73,7 +72,14 @@ class LocationForegroundService : Service() {
         // Extras
         const val EXTRA_SPEED_LIMIT = "speed_limit"
         const val EXTRA_ENABLE_HAPTICS = "enable_haptics"
+
+        /** True while GPS foreground tracking is active (avoids duplicate starts on relaunch). */
+        @Volatile
+        var isTrackingActive: Boolean = false
+            private set
     }
+
+    private var isTracking = false
     
 
     
@@ -86,6 +92,10 @@ class LocationForegroundService : Service() {
     private var serviceStartTime = 0L
     private var lastLocationTime = 0L
     private var stalledCheckJob: Job? = null
+    private var lastNotificationUpdateMs = 0L
+
+    /** Avoid updating the foreground notification on every GPS tick. */
+    private val notificationMinIntervalMs = 2000L
     
     override fun onCreate() {
         super.onCreate()
@@ -93,31 +103,38 @@ class LocationForegroundService : Service() {
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Satisfaction of Android's foreground service requirement MUST happen immediately
-        val startNotification = createNotification("Starting tracking...")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(
-                NOTIFICATION_ID, 
-                startNotification, 
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, startNotification)
+        when (intent?.action) {
+            ACTION_STOP -> {
+                stopForegroundTracking()
+                return START_NOT_STICKY
+            }
         }
-        
+
         when (intent?.action) {
             ACTION_START -> {
                 speedLimitKmh = intent.getDoubleExtra(EXTRA_SPEED_LIMIT, 120.0)
                 enableHapticAlerts = intent.getBooleanExtra(EXTRA_ENABLE_HAPTICS, true)
+                if (isTracking) {
+                    return START_NOT_STICKY
+                }
+                isTracking = true
+                isTrackingActive = true
                 serviceStartTime = System.currentTimeMillis()
+                startForegroundTyped(
+                    NOTIFICATION_ID,
+                    createNotification("Starting tracking..."),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                )
                 startForegroundTracking()
             }
-            ACTION_STOP -> {
-                stopForegroundTracking()
+            else -> {
+                // Process was killed; do not auto-resume (prevents zombie FGS + wake locks).
+                stopSelf()
+                return START_NOT_STICKY
             }
         }
-        
-        return START_STICKY
+
+        return START_NOT_STICKY
     }
     
     /**
@@ -186,18 +203,26 @@ class LocationForegroundService : Service() {
             hapticAlertManager.checkSpeed(speedKmh, speedLimitKmh)
         }
         
-        // Update notification
-        updateNotification(speedKmh)
-        
-        lastLocation = location
+        val now = System.currentTimeMillis()
+        if (now - lastNotificationUpdateMs >= notificationMinIntervalMs) {
+            lastNotificationUpdateMs = now
+            updateNotification(speedKmh)
+        }
     }
     
     /**
      * Stop foreground tracking completely.
      */
     private fun stopForegroundTracking() {
+        if (!isTracking) {
+            stopSelf()
+            return
+        }
+        isTracking = false
+        isTrackingActive = false
         locationJob?.cancel()
         stalledCheckJob?.cancel()
+        locationRepository.stopAllLocationUpdates()
         hapticAlertManager.stopAlerts()
         releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -274,11 +299,13 @@ class LocationForegroundService : Service() {
     }
     
     private fun acquireWakeLock() {
+        releaseWakeLock()
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "MotoRider::LocationWakeLock"
         ).apply {
+            setReferenceCounted(false)
             acquire()
         }
     }
@@ -293,8 +320,13 @@ class LocationForegroundService : Service() {
     }
     
     override fun onDestroy() {
-        super.onDestroy()
+        isTracking = false
+        isTrackingActive = false
+        locationJob?.cancel()
+        stalledCheckJob?.cancel()
+        locationRepository.stopAllLocationUpdates()
         serviceScope.cancel()
         releaseWakeLock()
+        super.onDestroy()
     }
 }

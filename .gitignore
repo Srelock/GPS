@@ -33,3 +33,7 @@ captures/
 # Keystore files
 *.jks
 *.keystore
+
+# Python
+__pycache__/
+*.pyc

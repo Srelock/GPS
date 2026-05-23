@@ -5,6 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.jvm.Volatile
 
 /**
  * A saved route consisting of GPS waypoints.
@@ -24,9 +25,12 @@ data class SavedRoute(
 class RouteRepository @Inject constructor(
     private val settingsRepository: SettingsRepository
 ) {
-    // In-memory recording buffer
+    // In-memory recording buffer (only while [recordingSessionActive] is true)
     private val recordingBuffer = mutableListOf<Pair<Double, Double>>()
     private var lastRecordedLocation: Location? = null
+
+    @Volatile
+    private var recordingSessionActive: Boolean = false
 
     companion object {
         private const val MIN_RECORD_DISTANCE_M = 100.0  // Record point every 100m
@@ -35,10 +39,28 @@ class RouteRepository @Inject constructor(
     }
 
     /**
+     * Start a new recording session: clears the buffer and accepts GPS points until [endRecordingSession] or [saveRecording].
+     */
+    fun beginRecordingSession() {
+        clearRecording()
+        recordingSessionActive = true
+    }
+
+    /**
+     * Discard the current session without persisting.
+     */
+    fun endRecordingSession() {
+        recordingSessionActive = false
+        clearRecording()
+    }
+
+    /**
      * Add a GPS point to the recording buffer.
      * Only records if moved at least MIN_RECORD_DISTANCE_M from the last point.
      */
     fun recordPoint(lat: Double, lon: Double) {
+        if (!recordingSessionActive) return
+
         val current = Location("").apply {
             latitude = lat
             longitude = lon
@@ -57,6 +79,8 @@ class RouteRepository @Inject constructor(
      */
     fun saveRecording(name: String): Boolean {
         if (recordingBuffer.size < 2) return false
+
+        recordingSessionActive = false
 
         val routes = decodeRoutes(settingsRepository.routesJson.value).toMutableList()
 

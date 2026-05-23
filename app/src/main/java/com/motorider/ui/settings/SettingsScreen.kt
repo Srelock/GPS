@@ -2,6 +2,7 @@ package com.motorider.ui.settings
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.background
@@ -29,6 +30,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -51,7 +53,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import com.motorider.data.repository.SettingsRepository
-import com.motorider.data.repository.RouteRepository
 import com.motorider.ui.dashboard.DashboardViewModel
 import com.motorider.ui.theme.CardBackground
 import com.motorider.ui.theme.DarkBackground
@@ -64,6 +65,15 @@ import com.motorider.ui.theme.TextPrimary
 import com.motorider.ui.theme.TextSecondary
 import com.motorider.service.OverlayService
 import com.motorider.service.RadioPlayerService
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+
+/** Default route name when recording starts (local date & time). */
+private val routeRecordingNameFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("yyyy-MM-dd HH.mm.ss")
+
+private fun defaultRouteRecordingName(): String =
+    LocalDateTime.now().format(routeRecordingNameFormatter)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -221,15 +231,24 @@ fun SettingsScreen(
                             value = newRouteName,
                             onValueChange = { newRouteName = it },
                             label = { Text("Route name") },
+                            supportingText = {
+                                Text("Filled with date & time — edit if you like", color = TextSecondary)
+                            },
                             modifier = Modifier.weight(1f),
                             singleLine = true
                         )
                         Button(
                             onClick = {
-                                if (newRouteName.isNotBlank()) {
-                                    viewModel.setRecordingRoute(false)
-                                    // Save will be handled externally
+                                val name = newRouteName.trim().ifBlank { defaultRouteRecordingName() }
+                                val saved = viewModel.saveRouteRecording(name)
+                                if (saved) {
                                     newRouteName = ""
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        "Need at least two GPS points (ride ~100 m).",
+                                        Toast.LENGTH_LONG
+                                    ).show()
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = NeonGreen)
@@ -238,7 +257,7 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(
                         onClick = {
-                            viewModel.setRecordingRoute(false)
+                            viewModel.cancelRouteRecording()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = NeonRed),
                         modifier = Modifier.fillMaxWidth()
@@ -246,7 +265,8 @@ fun SettingsScreen(
                 } else {
                     Button(
                         onClick = {
-                            viewModel.setRecordingRoute(true)
+                            newRouteName = defaultRouteRecordingName()
+                            viewModel.startRouteRecording()
                         },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = NeonOrange)
@@ -261,10 +281,11 @@ fun SettingsScreen(
                     buildList {
                         for (i in 0 until arr.length()) {
                             val obj = arr.optJSONObject(i) ?: continue
+                            val wpCount = obj.optJSONArray("waypoints")?.length() ?: 0
                             add(Triple(
                                 obj.optString("id", ""),
                                 obj.optString("name", "?"),
-                                obj.optInt("waypoints", 0)
+                                wpCount
                             ))
                         }
                     }
@@ -284,7 +305,27 @@ fun SettingsScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    routes.forEach { (id, name, _) ->
+                    OutlinedButton(
+                        onClick = {
+                            if (routesJson.isBlank() || routesJson == "[]") {
+                                Toast.makeText(context, "No routes to export", Toast.LENGTH_SHORT).show()
+                            } else {
+                                val send = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "MotoRider routes.json")
+                                    putExtra(Intent.EXTRA_TEXT, routesJson)
+                                }
+                                context.startActivity(
+                                    Intent.createChooser(send, "Export for RideMapper")
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Share routes for RideMapper", color = NeonCyan)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    routes.forEach { (id, name, wpCount) ->
                         val isActive = activeRouteId == id
                         Row(
                             modifier = Modifier
@@ -296,7 +337,11 @@ fun SettingsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(name, color = TextPrimary, fontWeight = FontWeight.Bold)
+                                Text(
+                                    "$name · $wpCount pts",
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.Bold
+                                )
                                 if (isActive) {
                                     Text("Active – cameras pre-loaded", color = NeonCyan,
                                         style = MaterialTheme.typography.bodySmall)

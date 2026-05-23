@@ -166,16 +166,22 @@ class MainActivity : ComponentActivity() {
     }
     
     private fun startLocationService() {
-        val serviceIntent = Intent(this, LocationForegroundService::class.java).apply {
-            action = LocationForegroundService.ACTION_START
-            putExtra(LocationForegroundService.EXTRA_SPEED_LIMIT, 120.0)
-            putExtra(LocationForegroundService.EXTRA_ENABLE_HAPTICS, true)
-        }
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
-        } else {
-            startService(serviceIntent)
+        lifecycleScope.launch {
+            if (LocationForegroundService.isTrackingActive) {
+                return@launch
+            }
+            val limit = settingsRepository.speedLimitKmh.first()
+            val haptics = settingsRepository.hapticEnabled.first()
+            val serviceIntent = Intent(this@MainActivity, LocationForegroundService::class.java).apply {
+                action = LocationForegroundService.ACTION_START
+                putExtra(LocationForegroundService.EXTRA_SPEED_LIMIT, limit)
+                putExtra(LocationForegroundService.EXTRA_ENABLE_HAPTICS, haptics)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
         }
     }
     

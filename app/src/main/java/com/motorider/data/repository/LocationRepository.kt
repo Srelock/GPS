@@ -13,12 +13,15 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -56,6 +59,15 @@ class LocationRepository @Inject constructor(
     val currentHeading: StateFlow<Float> = _currentHeading.asStateFlow() // degrees
     private val scope = MainScope()
 
+    /** One FusedLocationProvider callback shared by all collectors (avoids stacked GPS listeners). */
+    private val locationSubscriberCount = AtomicInteger(0)
+    private var fusedLocationCallback: LocationCallback? = null
+    private val locationUpdates = MutableSharedFlow<Location>(
+        replay = 1,
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+
     companion object {
         private const val INTERVAL_MOVING_MS = 1000L
         private const val ROAD_LIMIT_FETCH_COOLDOWN_MS = 15000L // 15 seconds min
@@ -70,30 +82,43 @@ class LocationRepository @Inject constructor(
     
     @SuppressLint("MissingPermission")
     fun startLocationUpdates(highAccuracy: Boolean = true): Flow<Location> = callbackFlow {
-        val priority = if (highAccuracy) Priority.PRIORITY_HIGH_ACCURACY else Priority.PRIORITY_BALANCED_POWER_ACCURACY
-        
+        registerLocationSubscriber(highAccuracy)
+        val collectJob = scope.launch {
+            locationUpdates.collect { location ->
+                trySend(location)
+            }
+        }
+        awaitClose {
+            collectJob.cancel()
+            unregisterLocationSubscriber()
+        }
+    }
+
+    /** Stops the shared GPS callback when no collectors remain (e.g. foreground service stopped). */
+    @SuppressLint("MissingPermission")
+    fun stopAllLocationUpdates() {
+        locationSubscriberCount.set(0)
+        removeFusedLocationCallback()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun registerLocationSubscriber(highAccuracy: Boolean) {
+        if (locationSubscriberCount.getAndIncrement() > 0) return
+
+        val priority = if (highAccuracy) {
+            Priority.PRIORITY_HIGH_ACCURACY
+        } else {
+            Priority.PRIORITY_BALANCED_POWER_ACCURACY
+        }
         val locationRequest = LocationRequest.Builder(priority, INTERVAL_MOVING_MS)
             .setMinUpdateIntervalMillis(INTERVAL_MOVING_MS / 2)
             .setMaxUpdateDelayMillis(INTERVAL_MOVING_MS)
             .build()
-        
+
         val callback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                val location = result.lastLocation
-                if (location != null) {
-                    _currentLocation.value = location
-                    
-                    val speedKmh = if (location.hasSpeed()) location.speed * 3.6 else 0.0
-                    _currentSpeed.value = speedKmh
-                    
-                    if (location.hasBearing()) _currentHeading.value = location.bearing
-                    
-                    checkAndFetchRoadSpeed(location)
-                    checkAndFetchCameras(location)
-                    checkCameraProximity(location)
-                    recordRoutePoint(location)
-                    
-                    trySend(location)
+                result.lastLocation?.let { location ->
+                    dispatchLocation(location)
                 }
             }
 
@@ -103,18 +128,35 @@ class LocationRepository @Inject constructor(
                 }
             }
         }
-        
-        android.util.Log.d("LocationRepository", "Requesting location updates (priority=$priority)")
+        fusedLocationCallback = callback
         fusedLocationClient.requestLocationUpdates(locationRequest, callback, Looper.getMainLooper())
-            .addOnFailureListener { e ->
-                android.util.Log.e("LocationRepository", "Failed to request location updates", e)
-                close(e)
-            }
-        
-        awaitClose {
-            android.util.Log.d("LocationRepository", "Stopping location updates")
-            fusedLocationClient.removeLocationUpdates(callback)
-        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun unregisterLocationSubscriber() {
+        if (locationSubscriberCount.decrementAndGet() > 0) return
+        removeFusedLocationCallback()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun removeFusedLocationCallback() {
+        fusedLocationCallback?.let { fusedLocationClient.removeLocationUpdates(it) }
+        fusedLocationCallback = null
+    }
+
+    private fun dispatchLocation(location: Location) {
+        _currentLocation.value = location
+
+        val speedKmh = if (location.hasSpeed()) location.speed * 3.6 else 0.0
+        _currentSpeed.value = speedKmh
+
+        if (location.hasBearing()) _currentHeading.value = location.bearing
+
+        checkAndFetchRoadSpeed(location)
+        checkAndFetchCameras(location)
+        checkCameraProximity(location)
+        recordRoutePoint(location)
+        locationUpdates.tryEmit(location)
     }
 
     private fun checkAndFetchRoadSpeed(location: Location) {
@@ -161,9 +203,6 @@ class LocationRepository @Inject constructor(
     }
 
     private fun recordRoutePoint(location: Location) {
-        // Only record if route recording is active
-        // This is checked by whether the repository has points being buffered
-        // The actual recording state toggle is managed by the ViewModel
         routeRepository.recordPoint(location.latitude, location.longitude)
     }
 

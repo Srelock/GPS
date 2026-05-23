@@ -7,6 +7,7 @@ import com.motorider.core.alert.HapticSpeedAlertManager
 import com.motorider.core.alert.SpeedAlertState
 import com.motorider.core.audio.BluetoothAudioManager
 import com.motorider.data.repository.LocationRepository
+import com.motorider.data.repository.RouteRepository
 import com.motorider.data.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,7 +25,8 @@ class DashboardViewModel @Inject constructor(
     private val locationRepository: LocationRepository,
     private val hapticAlertManager: HapticSpeedAlertManager,
     private val audioManager: BluetoothAudioManager,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val routeRepository: RouteRepository
 ) : ViewModel() {
     
     // Speed settings delegated to repository
@@ -141,6 +143,29 @@ class DashboardViewModel @Inject constructor(
 
     fun setRecordingRoute(recording: Boolean) {
         settingsRepository.setRecordingRoute(recording)
+    }
+
+    /** Clears the buffer and enables GPS capture for a new route. */
+    fun startRouteRecording() {
+        routeRepository.beginRecordingSession()
+        settingsRepository.setRecordingRoute(true)
+    }
+
+    fun cancelRouteRecording() {
+        routeRepository.endRecordingSession()
+        settingsRepository.setRecordingRoute(false)
+    }
+
+    /**
+     * Persists the in-memory recording buffer as a named route.
+     * @return false if the route is too short or the name is blank.
+     */
+    fun saveRouteRecording(name: String): Boolean {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) return false
+        if (!routeRepository.saveRecording(trimmed)) return false
+        settingsRepository.setRecordingRoute(false)
+        return true
     }
     
     /**

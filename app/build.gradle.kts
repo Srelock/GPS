@@ -7,12 +7,12 @@ plugins {
 
 android {
     namespace = "com.motorider"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.motorider"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
@@ -101,6 +101,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-common:1.3.1")
+    implementation("androidx.media:media:1.7.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

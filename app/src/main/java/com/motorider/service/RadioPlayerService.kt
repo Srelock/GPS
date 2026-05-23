@@ -5,15 +5,25 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ComponentName
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.media.app.NotificationCompat.MediaStyle
+import androidx.media.session.MediaButtonReceiver
+import androidx.media.session.MediaButtonReceiver.buildMediaButtonPendingIntent
+import android.content.pm.ServiceInfo
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.motorider.MainActivity
 import com.motorider.R
+import com.motorider.data.repository.SettingsRepository
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,11 +32,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URL
 
+@AndroidEntryPoint
 class RadioPlayerService : Service() {
+
+    @Inject lateinit var settingsRepository: SettingsRepository
 
     private var player: ExoPlayer? = null
     private var lastTitle: String = "Radio stopped"
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private lateinit var mediaSession: MediaSessionCompat
 
     companion object {
         private const val NOTIFICATION_ID = 3001
@@ -45,10 +59,18 @@ class RadioPlayerService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        // Media session must exist before ExoPlayer: player callbacks call createNotification()
+        // which reads mediaSession.sessionToken.
+        initMediaSession()
         ensurePlayer()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == Intent.ACTION_MEDIA_BUTTON) {
+            MediaButtonReceiver.handleIntent(mediaSession, intent)
+            return if (isPlaybackActive()) START_STICKY else START_NOT_STICKY
+        }
+
         when (intent?.action) {
             ACTION_PLAY -> {
                 val name = intent.getStringExtra(EXTRA_STATION_NAME) ?: "Radio"
@@ -61,8 +83,105 @@ class RadioPlayerService : Service() {
             ACTION_STOP -> stopPlaybackAndService()
         }
 
-        // Keep service alive while playing/paused. Notification is updated by actions.
-        return START_STICKY
+        return if (isPlaybackActive()) START_STICKY else START_NOT_STICKY
+    }
+
+    private fun isPlaybackActive(): Boolean {
+        val state = player?.playbackState
+        return player?.isPlaying == true ||
+            state == Player.STATE_BUFFERING ||
+            state == Player.STATE_READY
+    }
+
+    private fun initMediaSession() {
+        // Build session in a local val first: calling setPlaybackStateCompat during `.apply { }`
+        // would still read lateinit mediaSession before this assignment completes (crash on Android).
+        val session = MediaSessionCompat(
+            this,
+            "RadioPlayerService",
+            ComponentName(this, androidx.media.session.MediaButtonReceiver::class.java),
+            null
+        ).apply {
+            setFlags(
+                MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
+                    MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
+            )
+
+            setCallback(object : MediaSessionCompat.Callback() {
+                override fun onPlay() {
+                    // If we already have a playing item, just resume. Otherwise play selected station.
+                    if (player?.currentMediaItem != null) {
+                        player?.play()
+                        setPlaybackStateCompat(isPlaying = true)
+                        updateNotification()
+                        return
+                    }
+                    playSelectedStationOrFirst()
+                }
+
+                override fun onPause() {
+                    pause()
+                    setPlaybackStateCompat(isPlaying = false)
+                }
+
+                override fun onStop() {
+                    stopPlaybackAndService()
+                }
+
+                override fun onSkipToNext() {
+                    playRelativeStation(delta = 1)
+                }
+
+                override fun onSkipToPrevious() {
+                    playRelativeStation(delta = -1)
+                }
+            })
+
+            isActive = true
+        }
+        mediaSession = session
+        setPlaybackStateCompat(isPlaying = false)
+    }
+
+    private fun setPlaybackStateCompat(isPlaying: Boolean) {
+        val state = if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED
+        val actions = PlaybackStateCompat.ACTION_PLAY or
+            PlaybackStateCompat.ACTION_PAUSE or
+            PlaybackStateCompat.ACTION_STOP or
+            PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
+
+        mediaSession.setPlaybackState(
+            PlaybackStateCompat.Builder()
+                .setActions(actions)
+                .setState(state, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1.0f)
+                .build()
+        )
+    }
+
+    private fun playSelectedStationOrFirst() {
+        val stations = settingsRepository.radioStations.value
+        if (stations.isEmpty()) return
+        val selectedId = settingsRepository.selectedStationId.value
+        val station = stations.firstOrNull { it.id == selectedId } ?: stations.first()
+        playStation(station)
+    }
+
+    private fun playRelativeStation(delta: Int) {
+        val stations = settingsRepository.radioStations.value
+        if (stations.isEmpty()) return
+
+        val selectedId = settingsRepository.selectedStationId.value
+        val currentIndex = stations.indexOfFirst { it.id == selectedId }
+        val safeIndex = if (currentIndex == -1) 0 else currentIndex
+        val nextIndex = (safeIndex + delta + stations.size) % stations.size
+
+        playStation(stations[nextIndex])
+    }
+
+    private fun playStation(station: SettingsRepository.RadioStation) {
+        settingsRepository.setSelectedStation(station.id)
+        play(name = station.name, url = station.url)
     }
 
     private fun ensurePlayer() {
@@ -70,17 +189,24 @@ class RadioPlayerService : Service() {
         player = ExoPlayer.Builder(this).build().apply {
             addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    updateNotification()
+                    if (::mediaSession.isInitialized) {
+                        updateNotification()
+                        setPlaybackStateCompat(isPlaying = isPlaying)
+                    }
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
-                    updateNotification()
+                    if (::mediaSession.isInitialized) {
+                        updateNotification()
+                    }
                 }
 
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                     android.util.Log.e("RadioPlayerService", "ExoPlayer Error: ${error.message}", error)
                     lastTitle = "Error: ${error.errorCodeName}"
-                    updateNotification()
+                    if (::mediaSession.isInitialized) {
+                        updateNotification()
+                    }
                 }
             })
         }
@@ -108,15 +234,12 @@ class RadioPlayerService : Service() {
                 playWhenReady = true
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    createNotification(),
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, createNotification())
-            }
+            setPlaybackStateCompat(isPlaying = true)
+            startForegroundTyped(
+                NOTIFICATION_ID,
+                createNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            )
         }
     }
 
@@ -141,17 +264,24 @@ class RadioPlayerService : Service() {
     private fun pause() {
         player?.pause()
         lastTitle = "Paused"
+        if (::mediaSession.isInitialized) {
+            setPlaybackStateCompat(isPlaying = false)
+        }
         updateNotification()
     }
 
     private fun stopPlaybackAndService() {
         player?.stop()
         lastTitle = "Radio stopped"
+        if (::mediaSession.isInitialized) {
+            setPlaybackStateCompat(isPlaying = false)
+        }
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     private fun updateNotification() {
+        if (!::mediaSession.isInitialized) return
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIFICATION_ID, createNotification())
     }
@@ -183,6 +313,11 @@ class RadioPlayerService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val nextPendingIntent = buildMediaButtonPendingIntent(
+            this,
+            PlaybackStateCompat.ACTION_SKIP_TO_NEXT
+        )
+
         val isPlaying = player?.isPlaying == true
         val playStateText = when {
             isPlaying -> "Playing"
@@ -205,9 +340,19 @@ class RadioPlayerService : Service() {
                 pausePendingIntent
             )
             .addAction(
+                android.R.drawable.ic_media_next,
+                "Next",
+                nextPendingIntent
+            )
+            .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 "Stop",
                 stopPendingIntent
+            )
+            .setStyle(
+                MediaStyle()
+                    .setMediaSession(mediaSession.sessionToken)
+                    .setShowActionsInCompactView(0, 1)
             )
             .build()
     }
@@ -231,6 +376,10 @@ class RadioPlayerService : Service() {
         serviceScope.cancel()
         player?.release()
         player = null
+        if (::mediaSession.isInitialized) {
+            mediaSession.isActive = false
+            mediaSession.release()
+        }
     }
 }
 

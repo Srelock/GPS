@@ -6,10 +6,12 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
+import android.widget.Toast
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.FrameLayout
@@ -46,10 +48,17 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.motorider.MainActivity
 import com.motorider.R
 import com.motorider.data.repository.LocationRepository
+import com.motorider.data.repository.RouteRepository
 import com.motorider.data.repository.SettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -59,10 +68,12 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
 
     @Inject lateinit var locationRepository: LocationRepository
     @Inject lateinit var settingsRepository: SettingsRepository
+    @Inject lateinit var routeRepository: RouteRepository
 
     private val windowManager by lazy { getSystemService(Context.WINDOW_SERVICE) as WindowManager }
     private var overlayRoot: FrameLayout? = null
     private var overlayParams: WindowManager.LayoutParams? = null
+    private val overlayScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     // Backing fields with unique names to avoid clashes
     private val _serviceViewModelStore = ViewModelStore()
@@ -83,6 +94,32 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
         
         private const val MIN_WIDTH_DP = 160
         private const val MIN_HEIGHT_DP = 120
+
+        private val overlayRouteNameFormatter: DateTimeFormatter =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH.mm.ss")
+    }
+
+    private fun defaultOverlayRouteRecordingName(): String =
+        LocalDateTime.now().format(overlayRouteNameFormatter)
+
+    private fun startRouteRecordingFromOverlay() {
+        routeRepository.beginRecordingSession()
+        settingsRepository.setRecordingRoute(true)
+    }
+
+    private fun saveRouteRecordingFromOverlay() {
+        val name = defaultOverlayRouteRecordingName()
+        val ok = routeRepository.saveRecording(name)
+        if (ok) {
+            settingsRepository.setRecordingRoute(false)
+            Toast.makeText(this, "Route saved: $name", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(
+                this,
+                "Need at least two GPS points (~100 m apart). Keep riding, then save.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     override fun onBind(intent: Intent): IBinder? {
@@ -102,33 +139,43 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
             ACTION_START -> startOverlay()
             ACTION_STOP -> stopOverlay()
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun startOverlay() {
         if (overlayRoot != null) return
+
+        startForegroundTyped(
+            NOTIFICATION_ID,
+            createNotification("Overlay"),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        )
+
         if (!Settings.canDrawOverlays(this)) {
             android.util.Log.e("OverlayService", "Cannot show overlay: Permission not granted")
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(
-                NOTIFICATION_ID, 
-                createNotification("Overlay running"),
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, createNotification("Overlay running"))
+        overlayScope.launch {
+            val density = resources.displayMetrics.density
+            val dpX = settingsRepository.overlayX.first()
+            val dpY = settingsRepository.overlayY.first()
+            val dpWidth = settingsRepository.overlayWidth.first()
+            val dpHeight = settingsRepository.overlayHeight.first()
+            attachOverlayWindow(dpX, dpY, dpWidth, dpHeight, density)
         }
+    }
 
-        val density = resources.displayMetrics.density
-        // Fetch logical (DP) values and convert to Pixels
-        val dpX = runBlocking { settingsRepository.overlayX.first() }
-        val dpY = runBlocking { settingsRepository.overlayY.first() }
-        val dpWidth = runBlocking { settingsRepository.overlayWidth.first() }
-        val dpHeight = runBlocking { settingsRepository.overlayHeight.first() }
+    private fun attachOverlayWindow(
+        dpX: Double,
+        dpY: Double,
+        dpWidth: Double,
+        dpHeight: Double,
+        density: Float
+    ) {
+        if (overlayRoot != null) return
 
         val initialX = (dpX * density).toInt()
         val initialY = (dpY * density).toInt()
@@ -179,6 +226,8 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
                         locationRepository = locationRepository,
                         settingsRepository = settingsRepository,
                         overlayWidthDp = overlayWidthDp.floatValue,
+                        onStartRouteRecording = { startRouteRecordingFromOverlay() },
+                        onSaveRouteRecording = { saveRouteRecordingFromOverlay() },
                         onClose = { stopOverlay() },
                         onMove = { dx, dy ->
                             params.x += dx.roundToInt()
@@ -240,6 +289,7 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
     }
 
     override fun onDestroy() {
+        overlayScope.cancel()
         stopOverlay()
         super.onDestroy()
     }
@@ -355,6 +405,8 @@ private fun OverlayWindow(
     locationRepository: LocationRepository,
     settingsRepository: SettingsRepository,
     overlayWidthDp: Float,
+    onStartRouteRecording: () -> Unit,
+    onSaveRouteRecording: () -> Unit,
     onClose: () -> Unit,
     onMove: (Float, Float) -> Unit,
     onResize: (Float, Float) -> Unit,
@@ -368,6 +420,7 @@ private fun OverlayWindow(
 
     // HUD mode
     val hudMode by settingsRepository.hudMode.collectAsState()
+    val isRecordingRoute by settingsRepository.isRecordingRoute.collectAsState()
 
     // Speed camera distance
     val cameraDistM by locationRepository.nearestCameraDistance.collectAsState()
@@ -489,9 +542,9 @@ private fun OverlayWindow(
                     val scaledUnitSize = (overlayWidthDp / 14f).coerceIn(10f, 32f).sp
                     val unitPadding = (overlayWidthDp / 30f).coerceIn(4f, 20f).dp
 
-                    val displaySpeed = speedKmh * 0.621371
+                    val displaySpeed = if (useMph) speedKmh * 0.621371 else speedKmh
                     val roadLimit by locationRepository.roadSpeedLimit.collectAsState()
-                    val displayRoadLimit = roadLimit?.let { it * 0.621371 }
+                    val displayRoadLimit = roadLimit?.let { if (useMph) it * 0.621371 else it }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -665,6 +718,63 @@ private fun OverlayWindow(
                                             tint = textMain
                                         )
                                     }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Divider(
+                                modifier = Modifier.fillMaxWidth(0.75f).align(Alignment.CenterHorizontally),
+                                thickness = 1.dp,
+                                color = accentCyan.copy(alpha = 0.15f)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            val recContext = androidx.compose.ui.platform.LocalContext.current
+                            if (!isRecordingRoute) {
+                                Surface(
+                                    onClick = {
+                                        onStartRouteRecording()
+                                        Toast.makeText(
+                                            recContext,
+                                            "Recording — ride ~100 m, then Save route",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = com.motorider.ui.theme.CardBackground,
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.92f)
+                                        .align(Alignment.CenterHorizontally),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        com.motorider.ui.theme.NeonOrange.copy(alpha = 0.7f)
+                                    )
+                                ) {
+                                    Text(
+                                        text = "● Start recording",
+                                        modifier = Modifier.padding(vertical = 8.dp, horizontal = 12.dp),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = com.motorider.ui.theme.NeonOrange
+                                    )
+                                }
+                            } else {
+                                Surface(
+                                    onClick = { onSaveRouteRecording() },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = accentGreen.copy(alpha = 0.15f),
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.92f)
+                                        .align(Alignment.CenterHorizontally),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, accentGreen)
+                                ) {
+                                    Text(
+                                        text = "■ Save route",
+                                        modifier = Modifier.padding(vertical = 8.dp, horizontal = 12.dp),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = accentGreen
+                                    )
                                 }
                             }
                         }
