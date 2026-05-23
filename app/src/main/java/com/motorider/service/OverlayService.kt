@@ -91,6 +91,11 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
 
         const val ACTION_START = "com.motorider.action.OVERLAY_START"
         const val ACTION_STOP = "com.motorider.action.OVERLAY_STOP"
+
+        /** True while overlay window is attached; avoids duplicate startForegroundService calls. */
+        @Volatile
+        var isOverlayActive: Boolean = false
+            private set
         
         private const val MIN_WIDTH_DP = 160
         private const val MIN_HEIGHT_DP = 120
@@ -136,20 +141,26 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
-            ACTION_START -> startOverlay()
+            ACTION_START -> {
+                // Required on every startForegroundService() call — even when overlay is already up.
+                promoteToForeground()
+                startOverlay()
+            }
             ACTION_STOP -> stopOverlay()
         }
         return START_NOT_STICKY
     }
 
-    private fun startOverlay() {
-        if (overlayRoot != null) return
-
+    private fun promoteToForeground() {
         startForegroundTyped(
             NOTIFICATION_ID,
             createNotification("Overlay"),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         )
+    }
+
+    private fun startOverlay() {
+        if (overlayRoot != null) return
 
         if (!Settings.canDrawOverlays(this)) {
             android.util.Log.e("OverlayService", "Cannot show overlay: Permission not granted")
@@ -270,6 +281,7 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
             windowManager.addView(root, params)
             overlayRoot = root
             overlayParams = params
+            isOverlayActive = true
             android.util.Log.d("OverlayService", "Overlay window successfully added to WindowManager")
         } catch (e: Exception) {
             android.util.Log.e("OverlayService", "Error adding overlay window", e)
@@ -284,6 +296,7 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
         }
         overlayRoot = null
         overlayParams = null
+        isOverlayActive = false
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }

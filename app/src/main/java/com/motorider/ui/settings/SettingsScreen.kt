@@ -63,7 +63,6 @@ import com.motorider.ui.theme.NeonRed
 import com.motorider.ui.theme.NeonPurple
 import com.motorider.ui.theme.TextPrimary
 import com.motorider.ui.theme.TextSecondary
-import com.motorider.service.OverlayService
 import com.motorider.service.RadioPlayerService
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -437,15 +436,8 @@ fun SettingsScreen(
                                 return@Switch
                             }
 
+                            // MainActivity's overlay collector starts/stops the service.
                             viewModel.setOverlayEnabled(enabled)
-                            val svcIntent = Intent(context, OverlayService::class.java).apply {
-                                action = if (enabled) OverlayService.ACTION_START else OverlayService.ACTION_STOP
-                            }
-                            if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                ContextCompat.startForegroundService(context, svcIntent)
-                            } else {
-                                context.startService(svcIntent)
-                            }
                         },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = NeonCyan,

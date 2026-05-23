@@ -106,18 +106,20 @@ class MainActivity : ComponentActivity() {
 
     private fun updateOverlayService(enabled: Boolean) {
         val canDraw = Settings.canDrawOverlays(this)
-        val intent = Intent(this, OverlayService::class.java).apply {
-            action = if (enabled && canDraw) OverlayService.ACTION_START else OverlayService.ACTION_STOP
-        }
-        
         if (enabled && canDraw) {
+            if (OverlayService.isOverlayActive) return
+            val intent = Intent(this, OverlayService::class.java).apply {
+                action = OverlayService.ACTION_START
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 ContextCompat.startForegroundService(this, intent)
             } else {
                 startService(intent)
             }
         } else if (!enabled) {
-            // Only stop if explicitly disabled by user
+            val intent = Intent(this, OverlayService::class.java).apply {
+                action = OverlayService.ACTION_STOP
+            }
             startService(intent)
         }
     }

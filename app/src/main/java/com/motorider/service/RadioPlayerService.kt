@@ -76,6 +76,7 @@ class RadioPlayerService : Service() {
                 val name = intent.getStringExtra(EXTRA_STATION_NAME) ?: "Radio"
                 val url = intent.getStringExtra(EXTRA_STATION_URL)
                 if (!url.isNullOrBlank()) {
+                    promoteToForeground()
                     play(name = name, url = url)
                 }
             }
@@ -212,10 +213,18 @@ class RadioPlayerService : Service() {
         }
     }
 
+    private fun promoteToForeground() {
+        startForegroundTyped(
+            NOTIFICATION_ID,
+            createNotification(),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+        )
+    }
+
     private fun play(name: String, url: String) {
         ensurePlayer()
         lastTitle = "Loading: $name"
-        updateNotification()
+        promoteToForeground()
 
         serviceScope.launch {
             val resolvedUrl = resolveStreamUrl(url) ?: url
@@ -235,11 +244,7 @@ class RadioPlayerService : Service() {
             }
 
             setPlaybackStateCompat(isPlaying = true)
-            startForegroundTyped(
-                NOTIFICATION_ID,
-                createNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-            )
+            updateNotification()
         }
     }
 
