@@ -500,7 +500,22 @@ fun SettingsScreen(
                 }
 
                 Text(
-                    text = "Radio stations",
+                    text = "Your stations",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = TextSecondary,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                RadioBrowserSettingsSection(
+                    viewModel = viewModel,
+                    savedStationIds = stations.map { it.id }.toSet()
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Add custom stream",
                     style = MaterialTheme.typography.titleSmall,
                     color = TextSecondary,
                     fontWeight = FontWeight.Bold

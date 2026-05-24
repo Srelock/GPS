@@ -7,11 +7,15 @@ import com.motorider.core.alert.HapticSpeedAlertManager
 import com.motorider.core.alert.SpeedAlertState
 import com.motorider.core.audio.BluetoothAudioManager
 import com.motorider.data.repository.LocationRepository
+import com.motorider.data.repository.RadioBrowserRepository
+import com.motorider.data.repository.RadioBrowserStation
 import com.motorider.data.repository.RouteRepository
 import com.motorider.data.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -27,8 +31,18 @@ class DashboardViewModel @Inject constructor(
     private val hapticAlertManager: HapticSpeedAlertManager,
     private val audioManager: BluetoothAudioManager,
     private val settingsRepository: SettingsRepository,
-    private val routeRepository: RouteRepository
+    private val routeRepository: RouteRepository,
+    private val radioBrowserRepository: RadioBrowserRepository
 ) : ViewModel() {
+
+    private val _radioBrowseResults = MutableStateFlow<List<RadioBrowserStation>>(emptyList())
+    val radioBrowseResults: StateFlow<List<RadioBrowserStation>> = _radioBrowseResults.asStateFlow()
+
+    private val _radioBrowseLoading = MutableStateFlow(false)
+    val radioBrowseLoading: StateFlow<Boolean> = _radioBrowseLoading.asStateFlow()
+
+    private val _radioBrowseError = MutableStateFlow<String?>(null)
+    val radioBrowseError: StateFlow<String?> = _radioBrowseError.asStateFlow()
     
     // Speed settings delegated to repository
     val speedLimit: StateFlow<Double> = settingsRepository.speedLimitKmh
@@ -120,6 +134,78 @@ class DashboardViewModel @Inject constructor(
 
     fun setSelectedRadioStation(id: String?) {
         settingsRepository.setSelectedStation(id)
+    }
+
+    fun searchRadioBrowser(query: String) {
+        viewModelScope.launch {
+            _radioBrowseLoading.value = true
+            _radioBrowseError.value = null
+            try {
+                val results = radioBrowserRepository.searchByName(query)
+                _radioBrowseResults.value = results
+                if (results.isEmpty() && query.trim().length >= 2) {
+                    _radioBrowseError.value = "No stations found"
+                }
+            } catch (e: Exception) {
+                _radioBrowseError.value = "Search failed"
+                _radioBrowseResults.value = emptyList()
+            } finally {
+                _radioBrowseLoading.value = false
+            }
+        }
+    }
+
+    fun loadRadioBrowserUk() {
+        viewModelScope.launch {
+            _radioBrowseLoading.value = true
+            _radioBrowseError.value = null
+            try {
+                val results = radioBrowserRepository.stationsByCountryCode("gb")
+                _radioBrowseResults.value = results
+                if (results.isEmpty()) {
+                    _radioBrowseError.value = "No UK stations returned"
+                }
+            } catch (e: Exception) {
+                _radioBrowseError.value = "Could not load UK stations"
+                _radioBrowseResults.value = emptyList()
+            } finally {
+                _radioBrowseLoading.value = false
+            }
+        }
+    }
+
+    fun loadRadioBrowserByTag(tag: String) {
+        viewModelScope.launch {
+            _radioBrowseLoading.value = true
+            _radioBrowseError.value = null
+            try {
+                val results = radioBrowserRepository.stationsByTag(tag)
+                _radioBrowseResults.value = results
+                if (results.isEmpty()) {
+                    _radioBrowseError.value = "No stations for \"$tag\""
+                }
+            } catch (e: Exception) {
+                _radioBrowseError.value = "Could not load tag"
+                _radioBrowseResults.value = emptyList()
+            } finally {
+                _radioBrowseLoading.value = false
+            }
+        }
+    }
+
+    fun addRadioBrowserStationToFavourites(station: RadioBrowserStation) {
+        val radio = station.toRadioStation()
+        settingsRepository.upsertStation(
+            name = radio.name,
+            url = radio.url,
+            id = radio.id
+        )
+        settingsRepository.setSelectedStation(radio.id)
+    }
+
+    fun clearRadioBrowseResults() {
+        _radioBrowseResults.value = emptyList()
+        _radioBrowseError.value = null
     }
 
     // HUD mode
