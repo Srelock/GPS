@@ -192,7 +192,7 @@ fun SettingsScreen(
                             color = TextPrimary
                         )
                         Text(
-                            text = "Alerts at 500m (visual) and 300m (pulse)",
+                            text = "Alerts within 150m",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )

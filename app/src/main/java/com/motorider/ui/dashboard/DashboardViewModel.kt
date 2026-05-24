@@ -74,8 +74,7 @@ class DashboardViewModel @Inject constructor(
     )
     
     init {
-        // Apply user's request for 300m alert distance
-        setSpeedCameraAlertDistance(300.0)
+        setSpeedCameraAlertDistance(150.0)
     }
     
     /**

@@ -157,9 +157,9 @@ class SettingsRepository @Inject constructor(
 
     val speedCameraAlertDistance: StateFlow<Double> = context.dataStore.data
         .map { preferences ->
-            preferences[PreferencesKeys.SPEED_CAMERA_ALERT_DISTANCE] ?: 500.0
+            preferences[PreferencesKeys.SPEED_CAMERA_ALERT_DISTANCE] ?: 150.0
         }
-        .stateIn(scope, SharingStarted.Eagerly, 500.0)
+        .stateIn(scope, SharingStarted.Eagerly, 150.0)
 
     // Favourite routes
     val routesJson: StateFlow<String> = context.dataStore.data
@@ -300,14 +300,16 @@ class SettingsRepository @Inject constructor(
 
     private fun decodeStations(raw: String?): List<RadioStation> {
         val kissPls = "http://www.radiofeeds.net/playlists/bauer.pls?station=kissnational-mp3"
+        val planetRockPls = "http://www.radiofeeds.net/playlists/bauer.pls?station=planetrock-mp3"
+        val absoluteStream = "https://stream-ar.hellorayo.co.uk/absoluteradiohigh.aac"
         val defaultStations = listOf(
             RadioStation("capital_fm", "Capital FM", "https://media-ssl.musicradio.com/CapitalMP3"),
             RadioStation("capital_dance", "Capital Dance", "https://media-ssl.musicradio.com/CapitalDanceMP3"),
-            // Sharp-stream endpoints often require short-lived tokens; use a playlist that resolves to a fresh URL.
+            // Bauer sharp-stream / hellorayo URLs need fresh tokens; PLS or play-time skey refresh.
             RadioStation("kiss_fm", "Kiss FM", kissPls),
             RadioStation("heart_dance", "Heart Dance", "https://media-ssl.musicradio.com/HeartDanceMP3"),
-            RadioStation("planet_rock", "Planet Rock", "https://stream-mz.hellorayo.co.uk/planetrock.aac"),
-            RadioStation("absolute_radio", "Absolute Radio", "https://stream-ar.hellorayo.co.uk/absoluteradiohigh.aac"),
+            RadioStation("planet_rock", "Planet Rock", planetRockPls),
+            RadioStation("absolute_radio", "Absolute Radio", absoluteStream),
             RadioStation("radio_x_uk", "Radio X", "https://media-ssl.musicradio.com/RadioXUKMP3"),
             RadioStation("heart_london", "Heart London", "https://media-ssl.musicradio.com/HeartLondonMP3"),
             RadioStation("lbc_london", "LBC London", "https://media-ssl.musicradio.com/LBCLondonMP3"),
@@ -335,12 +337,20 @@ class SettingsRepository @Inject constructor(
             defaultStations
         }
 
-        // Lightweight migration: replace known-broken Kiss URL(s) with the playlist resolver.
+        // Migrate known-broken Bauer stream URLs to resolvers that work in ExoPlayer.
         return parsed.map { s ->
-            if (s.id == "kiss_fm" && (s.url.contains("sharp-stream.com/kissnational") || s.url.contains("planetradio.co.uk/kissnational"))) {
-                s.copy(url = kissPls)
-            } else {
-                s
+            when {
+                s.id == "kiss_fm" && (
+                    s.url.contains("sharp-stream.com/kissnational") ||
+                        s.url.contains("planetradio.co.uk/kissnational")
+                    ) -> s.copy(url = kissPls)
+                s.id == "planet_rock" && s.url.contains("hellorayo.co.uk/planetrock") ->
+                    s.copy(url = planetRockPls)
+                s.id == "absolute_radio" && (
+                    s.url.contains("hellorayo.co.uk/absoluteradio") ||
+                        s.url.contains("sharp-stream.com/absoluteradio")
+                    ) -> s.copy(url = absoluteStream)
+                else -> s
             }
         }
     }

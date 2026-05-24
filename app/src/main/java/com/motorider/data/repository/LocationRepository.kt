@@ -77,7 +77,7 @@ class LocationRepository @Inject constructor(
         // Speed camera thresholds
         private const val CAMERA_FETCH_COOLDOWN_MS = 30000L     // 30 seconds
         private const val CAMERA_FETCH_MIN_DISTANCE_M = 500.0   // 500 meters
-        private const val CAMERA_ALERT_RANGE_M = 500f           // Show alert within 500m
+        private const val CAMERA_ALERT_RANGE_M = 150f           // Show alert within 150m
     }
     
     @SuppressLint("MissingPermission")

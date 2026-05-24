@@ -92,7 +92,12 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
         const val ACTION_START = "com.motorider.action.OVERLAY_START"
         const val ACTION_STOP = "com.motorider.action.OVERLAY_STOP"
 
-        /** True while overlay window is attached; avoids duplicate startForegroundService calls. */
+        /** True after [promoteToForeground] — set synchronously on each FGS start. */
+        @Volatile
+        var isForegroundActive: Boolean = false
+            private set
+
+        /** True while overlay window is attached. */
         @Volatile
         var isOverlayActive: Boolean = false
             private set
@@ -139,14 +144,26 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_STOP -> {
+                // startService(STOP) on a fresh instance still counts as an FGS start on API 34+.
+                promoteToForeground()
+                super.onStartCommand(intent, flags, startId)
+                stopOverlay()
+                return START_NOT_STICKY
+            }
+        }
+        // Must run before super and before any async work — satisfies every startForegroundService().
+        promoteToForeground()
         super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
-            ACTION_START -> {
-                // Required on every startForegroundService() call — even when overlay is already up.
-                promoteToForeground()
-                startOverlay()
+            ACTION_START -> startOverlay()
+            else -> {
+                android.util.Log.w(
+                    "OverlayService",
+                    "onStartCommand without action; foreground only (intent=$intent)"
+                )
             }
-            ACTION_STOP -> stopOverlay()
         }
         return START_NOT_STICKY
     }
@@ -157,6 +174,7 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
             createNotification("Overlay"),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         )
+        isForegroundActive = true
     }
 
     private fun startOverlay() {
@@ -164,6 +182,7 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
 
         if (!Settings.canDrawOverlays(this)) {
             android.util.Log.e("OverlayService", "Cannot show overlay: Permission not granted")
+            isForegroundActive = false
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return
@@ -297,14 +316,29 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
         overlayRoot = null
         overlayParams = null
         isOverlayActive = false
+        isForegroundActive = false
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     override fun onDestroy() {
         overlayScope.cancel()
-        stopOverlay()
+        removeOverlayWindowOnly()
+        isForegroundActive = false
         super.onDestroy()
+    }
+
+    /** Detach the floating window without tearing down the service (used from [onDestroy]). */
+    private fun removeOverlayWindowOnly() {
+        overlayRoot?.let {
+            try {
+                windowManager.removeView(it)
+            } catch (_: Exception) {
+            }
+        }
+        overlayRoot = null
+        overlayParams = null
+        isOverlayActive = false
     }
 
     private fun createNotificationChannel() {
@@ -371,7 +405,7 @@ private fun PulsingCameraWarning(distanceM: Float) {
     val infiniteTransition = rememberInfiniteTransition(label = "cameraPulse")
 
     // Pulse faster when closer
-    val duration = if (distanceM < 300f) 400 else 800
+    val duration = if (distanceM < 150f) 400 else 800
     val warnAlpha by infiniteTransition.animateFloat(
         initialValue = 0.4f,
         targetValue = 1.0f,

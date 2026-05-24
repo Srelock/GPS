@@ -95,7 +95,7 @@ fun DashboardScreen(
                     initialValue = 0.5f,
                     targetValue = 1.0f,
                     animationSpec = infiniteRepeatable(
-                        animation = tween(if (dist < 300f) 400 else 800),
+                        animation = tween(if (dist < 150f) 400 else 800),
                         repeatMode = RepeatMode.Reverse
                     ),
                     label = "dashCameraAlpha"

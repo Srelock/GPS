@@ -108,23 +108,18 @@ class LocationForegroundService : Service() {
                 stopForegroundTracking()
                 return START_NOT_STICKY
             }
-        }
-
-        when (intent?.action) {
             ACTION_START -> {
                 speedLimitKmh = intent.getDoubleExtra(EXTRA_SPEED_LIMIT, 120.0)
                 enableHapticAlerts = intent.getBooleanExtra(EXTRA_ENABLE_HAPTICS, true)
+                // Every startForegroundService() delivery must call startForeground(), including
+                // duplicate ACTION_START while tracking is already active (common on relaunch).
+                promoteToForeground()
                 if (isTracking) {
                     return START_NOT_STICKY
                 }
                 isTracking = true
                 isTrackingActive = true
                 serviceStartTime = System.currentTimeMillis()
-                startForegroundTyped(
-                    NOTIFICATION_ID,
-                    createNotification("Starting tracking..."),
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-                )
                 startForegroundTracking()
             }
             else -> {
@@ -135,6 +130,14 @@ class LocationForegroundService : Service() {
         }
 
         return START_NOT_STICKY
+    }
+
+    private fun promoteToForeground() {
+        startForegroundTyped(
+            NOTIFICATION_ID,
+            createNotification(if (isTracking) "GPS tracking active" else "Starting tracking..."),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        )
     }
     
     /**

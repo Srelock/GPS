@@ -25,6 +25,7 @@ import com.motorider.ui.dashboard.DashboardViewModel
 import com.motorider.ui.theme.MotoRiderTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -107,7 +108,9 @@ class MainActivity : ComponentActivity() {
     private fun updateOverlayService(enabled: Boolean) {
         val canDraw = Settings.canDrawOverlays(this)
         if (enabled && canDraw) {
-            if (OverlayService.isOverlayActive) return
+            // isOverlayActive is set only after the window attaches; isForegroundActive is set
+            // synchronously in the service and prevents duplicate startForegroundService() races.
+            if (OverlayService.isForegroundActive || OverlayService.isOverlayActive) return
             val intent = Intent(this, OverlayService::class.java).apply {
                 action = OverlayService.ACTION_START
             }
@@ -117,6 +120,11 @@ class MainActivity : ComponentActivity() {
                 startService(intent)
             }
         } else if (!enabled) {
+            // Avoid startService(STOP) when nothing is running — on API 34+ that still
+            // creates a foreground-typed service and crashes without startForeground().
+            if (!OverlayService.isForegroundActive && !OverlayService.isOverlayActive) {
+                return
+            }
             val intent = Intent(this, OverlayService::class.java).apply {
                 action = OverlayService.ACTION_STOP
             }
@@ -126,9 +134,13 @@ class MainActivity : ComponentActivity() {
 
     private fun setupOverlayCollector() {
         lifecycleScope.launch {
-            settingsRepository.overlayEnabled.collectLatest { enabled ->
-                updateOverlayService(enabled)
-            }
+            // StateFlow emits the default false before DataStore hydrates; ignore that
+            // emission so we do not send a spurious OVERLAY_STOP on every cold start.
+            settingsRepository.overlayEnabled
+                .drop(1)
+                .collectLatest { enabled ->
+                    updateOverlayService(enabled)
+                }
         }
     }
     
@@ -167,7 +179,13 @@ class MainActivity : ComponentActivity() {
         }
     }
     
+    private var locationServiceStartRequested = false
+
     private fun startLocationService() {
+        if (locationServiceStartRequested && LocationForegroundService.isTrackingActive) {
+            return
+        }
+        locationServiceStartRequested = true
         lifecycleScope.launch {
             if (LocationForegroundService.isTrackingActive) {
                 return@launch

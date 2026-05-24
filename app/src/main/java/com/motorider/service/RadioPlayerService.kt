@@ -30,6 +30,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
 import java.net.URL
 
 @AndroidEntryPoint
@@ -227,7 +228,7 @@ class RadioPlayerService : Service() {
         promoteToForeground()
 
         serviceScope.launch {
-            val resolvedUrl = resolveStreamUrl(url) ?: url
+            val resolvedUrl = resolveStreamUrl(url)
 
             lastTitle = "Playing: $name"
 
@@ -248,21 +249,50 @@ class RadioPlayerService : Service() {
         }
     }
 
-    private suspend fun resolveStreamUrl(url: String): String? {
-        // Some stations provide short-lived tokenized stream URLs via .pls playlists.
-        val looksLikePls = url.contains(".pls", ignoreCase = true) || url.contains("playlists/", ignoreCase = true)
-        if (!looksLikePls) return null
+    private suspend fun resolveStreamUrl(url: String): String {
+        var resolved = url
+        val looksLikePls =
+            url.contains(".pls", ignoreCase = true) || url.contains("playlists/", ignoreCase = true)
+        if (looksLikePls) {
+            resolvePlsUrl(url)?.let { resolved = it }
+        }
+        return refreshStreamAuth(resolved)
+    }
 
-        return withContext(Dispatchers.IO) {
-            runCatching {
-                val text = URL(url).readText()
-                val file1 = text.lineSequence()
+    private suspend fun resolvePlsUrl(plsUrl: String): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val connection = (URL(plsUrl).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                setRequestProperty("User-Agent", "MotoRider/1.0 (Android)")
+                connectTimeout = 15_000
+                readTimeout = 15_000
+            }
+            connection.inputStream.bufferedReader().use { reader ->
+                reader.lineSequence()
                     .map { it.trim() }
                     .firstOrNull { it.startsWith("File1=", ignoreCase = true) }
                     ?.substringAfter("=", missingDelimiterValue = "")
                     ?.trim()
-                file1?.takeIf { it.startsWith("http", ignoreCase = true) }
-            }.getOrNull()
+                    ?.takeIf { it.startsWith("http", ignoreCase = true) }
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * Bauer / Global streams use a short-lived epoch key; refresh it on every play.
+     */
+    private fun refreshStreamAuth(url: String): String {
+        val needsSkey = listOf("hellorayo.co.uk", "planetradio.co.uk", "sharp-stream.com")
+            .any { host -> url.contains(host, ignoreCase = true) }
+        if (!needsSkey) return url
+
+        val epoch = (System.currentTimeMillis() / 1000).toString()
+        val skeyParam = Regex("aw_0_1st\\.skey=[^&]*", RegexOption.IGNORE_CASE)
+        return if (skeyParam.containsMatchIn(url)) {
+            url.replace(skeyParam, "aw_0_1st.skey=$epoch")
+        } else {
+            val separator = if (url.contains("?")) "&" else "?"
+            "$url${separator}aw_0_1st.skey=$epoch"
         }
     }
 
