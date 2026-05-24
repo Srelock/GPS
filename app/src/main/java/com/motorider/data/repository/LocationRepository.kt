@@ -62,6 +62,8 @@ class LocationRepository @Inject constructor(
     /** One FusedLocationProvider callback shared by all collectors (avoids stacked GPS listeners). */
     private val locationSubscriberCount = AtomicInteger(0)
     private var fusedLocationCallback: LocationCallback? = null
+    private var previousLocation: Location? = null
+    private var previousSampleWallTimeMs: Long = 0L
     private val locationUpdates = MutableSharedFlow<Location>(
         replay = 1,
         extraBufferCapacity = 64,
@@ -70,6 +72,10 @@ class LocationRepository @Inject constructor(
 
     companion object {
         private const val INTERVAL_MOVING_MS = 1000L
+        /** Emulator route playback often omits [Location.speed]; derive from movement instead. */
+        private const val MIN_DERIVED_SPEED_DT_MS = 250L
+        private const val MIN_DERIVED_SPEED_DISTANCE_M = 1.0
+        private const val MAX_REASONABLE_SPEED_KMH = 350.0
         private const val ROAD_LIMIT_FETCH_COOLDOWN_MS = 15000L // 15 seconds min
         private const val ROAD_LIMIT_MIN_DISTANCE_M = 50.0      // 50 meters min
         private const val SPEED_THRESHOLD_KMH = 5.0
@@ -99,6 +105,8 @@ class LocationRepository @Inject constructor(
     fun stopAllLocationUpdates() {
         locationSubscriberCount.set(0)
         removeFusedLocationCallback()
+        previousLocation = null
+        previousSampleWallTimeMs = 0L
     }
 
     @SuppressLint("MissingPermission")
@@ -113,6 +121,8 @@ class LocationRepository @Inject constructor(
         val locationRequest = LocationRequest.Builder(priority, INTERVAL_MOVING_MS)
             .setMinUpdateIntervalMillis(INTERVAL_MOVING_MS / 2)
             .setMaxUpdateDelayMillis(INTERVAL_MOVING_MS)
+            .setMinUpdateDistanceMeters(0f)
+            .setWaitForAccurateLocation(false)
             .build()
 
         val callback = object : LocationCallback() {
@@ -130,6 +140,12 @@ class LocationRepository @Inject constructor(
         }
         fusedLocationCallback = callback
         fusedLocationClient.requestLocationUpdates(locationRequest, callback, Looper.getMainLooper())
+
+        // Prime UI with last known fix (helps emulator single points before route starts).
+        fusedLocationClient.lastLocation
+            .addOnSuccessListener { location ->
+                location?.let { dispatchLocation(it) }
+            }
     }
 
     @SuppressLint("MissingPermission")
@@ -147,7 +163,7 @@ class LocationRepository @Inject constructor(
     private fun dispatchLocation(location: Location) {
         _currentLocation.value = location
 
-        val speedKmh = if (location.hasSpeed()) location.speed * 3.6 else 0.0
+        val speedKmh = resolveSpeedKmh(location)
         _currentSpeed.value = speedKmh
 
         if (location.hasBearing()) _currentHeading.value = location.bearing
@@ -204,6 +220,43 @@ class LocationRepository @Inject constructor(
 
     private fun recordRoutePoint(location: Location) {
         routeRepository.recordPoint(location.latitude, location.longitude)
+    }
+
+    /**
+     * Prefer GPS-reported speed; fall back to distance over time (required for many emulators).
+     */
+    private fun resolveSpeedKmh(location: Location): Double {
+        if (location.hasSpeed() && location.speed > 0f) {
+            resetSpeedSample(location)
+            return location.speed * 3.6
+        }
+
+        val nowMs = System.currentTimeMillis()
+        val prev = previousLocation
+        if (prev == null) {
+            resetSpeedSample(location, nowMs)
+            return 0.0
+        }
+
+        val dtMs = nowMs - previousSampleWallTimeMs
+        if (dtMs < MIN_DERIVED_SPEED_DT_MS) {
+            return _currentSpeed.value
+        }
+
+        val distanceM = prev.distanceTo(location).toDouble()
+        resetSpeedSample(location, nowMs)
+
+        if (distanceM < MIN_DERIVED_SPEED_DISTANCE_M) {
+            return 0.0
+        }
+
+        val speedKmh = (distanceM / (dtMs / 1000.0)) * 3.6
+        return if (speedKmh in 0.0..MAX_REASONABLE_SPEED_KMH) speedKmh else _currentSpeed.value
+    }
+
+    private fun resetSpeedSample(location: Location, wallTimeMs: Long = System.currentTimeMillis()) {
+        previousLocation = Location(location)
+        previousSampleWallTimeMs = wallTimeMs
     }
 
 

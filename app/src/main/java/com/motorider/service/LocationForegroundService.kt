@@ -199,7 +199,7 @@ class LocationForegroundService : Service() {
      * Process each location update.
      */
     private suspend fun processLocationUpdate(location: Location) {
-        val speedKmh = if (location.hasSpeed()) location.speed * 3.6 else 0.0
+        val speedKmh = locationRepository.currentSpeed.value
         
         // Check speed alerts
         if (enableHapticAlerts) {

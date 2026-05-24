@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -75,6 +76,10 @@ class DashboardViewModel @Inject constructor(
     
     init {
         setSpeedCameraAlertDistance(150.0)
+        // Keep GPS active on the dashboard even if the foreground service is delayed (emulator/testing).
+        viewModelScope.launch {
+            locationRepository.startLocationUpdates(highAccuracy = true).collect { }
+        }
     }
     
     /**

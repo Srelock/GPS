@@ -33,32 +33,32 @@ fun Speedometer(
     alertState: SpeedAlertState,
     speedLimit: Double,
     roadSpeedLimit: Double? = null,
-    maxSpeedInMph: Double = 80.0,
     modifier: Modifier = Modifier
 ) {
     // Current app architecture uses km/h internally, but we now only show MPH
     val displaySpeedMph = speedKmh * 0.621371
     val speedInt = displaySpeedMph.toInt()
 
-    // Calculate max speed bar in display units
-    val maxDisplaySpeed = maxSpeedInMph
-    
-    // Alert color logic
-    val baseColor = when (alertState) {
-        SpeedAlertState.NORMAL -> NeonCyan
-        SpeedAlertState.APPROACHING -> NeonGreen
-        SpeedAlertState.WARNING -> NeonOrange
-        SpeedAlertState.CRITICAL -> NeonRed
+    // Bar reaches 100% at 30 mph (anything faster stays full)
+    val barFullAtMph = 30.0
+    val speedFraction = (displaySpeedMph / barFullAtMph).coerceIn(0.0, 1.0).toFloat()
+
+    // Bar color: cyan when within limit, warm colors when over (road sign or user limit)
+    val limitKmh = roadSpeedLimit ?: speedLimit
+    val limitMph = limitKmh * 0.621371
+    val barColorTarget = when {
+        limitMph <= 0 -> NeonCyan
+        displaySpeedMph > limitMph * 1.1 -> NeonRed
+        displaySpeedMph > limitMph -> NeonOrange
+        alertState == SpeedAlertState.APPROACHING -> NeonGreen
+        else -> NeonCyan
     }
-    
-    val hudColor by animateColorAsState(
-        targetValue = baseColor,
+
+    val barColor by animateColorAsState(
+        targetValue = barColorTarget,
         animationSpec = tween(500),
-        label = "hudColor"
+        label = "barColor"
     )
-    
-    // Fraction of max speed (0.0 to 1.0)
-    val speedFraction = (displaySpeedMph / maxDisplaySpeed).coerceIn(0.0, 1.0).toFloat()
     
     // Animate the bar expansion
     val animatedFraction by animateFloatAsState(
@@ -70,18 +70,13 @@ fun Speedometer(
         label = "barProgress"
     )
 
-    Box(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .height(240.dp)
-            .padding(16.dp),
-        contentAlignment = Alignment.Center
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Top
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.fillMaxSize()
-        ) {
             
             // Digital Speed Reading
             Row(
@@ -135,11 +130,9 @@ fun Speedometer(
                 }
             }
             
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // 2. Center-Out Linear Bar
+            // Center-out linear bar
             Canvas(modifier = Modifier
                 .fillMaxWidth()
                 .height(18.dp)
@@ -150,20 +143,20 @@ fun Speedometer(
                 
                 // Track Background
                 drawRect(
-                    color = hudColor.copy(alpha = 0.05f),
+                    color = barColor.copy(alpha = 0.05f),
                     size = size
                 )
-                
+
                 // Active Expanding Bar
                 val currentBarWidth = totalWidth * animatedFraction
                 val startX = center.x - (currentBarWidth / 2)
-                
+
                 drawRect(
                     brush = Brush.horizontalGradient(
                         colors = listOf(
-                            hudColor.copy(alpha = 0.3f),
-                            hudColor,
-                            hudColor.copy(alpha = 0.3f)
+                            barColor.copy(alpha = 0.3f),
+                            barColor,
+                            barColor.copy(alpha = 0.3f)
                         ),
                         startX = startX,
                         endX = startX + currentBarWidth
@@ -171,10 +164,10 @@ fun Speedometer(
                     topLeft = Offset(startX, 0f),
                     size = Size(currentBarWidth, barHeight)
                 )
-                
+
                 // Frame border
                 drawRect(
-                    color = hudColor.copy(alpha = 0.2f),
+                    color = barColor.copy(alpha = 0.2f),
                     style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx())
                 )
                 
@@ -186,7 +179,6 @@ fun Speedometer(
                     strokeWidth = 2.dp.toPx()
                 )
             }
-        }
     }
 }
 

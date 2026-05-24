@@ -14,9 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.Icon
@@ -36,7 +34,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.motorider.ui.dashboard.components.Speedometer
 import androidx.compose.material.icons.filled.Close
 import com.motorider.ui.theme.DarkBackground
-import com.motorider.ui.theme.NeonCyan
 import com.motorider.ui.theme.TextPrimary
 import com.motorider.ui.theme.TextSecondary
 
@@ -62,10 +59,9 @@ fun DashboardScreen(
     // Speed cameras
     val camerasEnabled by viewModel.speedCamerasEnabled.collectAsState()
 
-    val accentCyan = NeonCyan
     val accentRed = NeonRed
     val textSec = TextSecondary
-    
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -78,15 +74,6 @@ fun DashboardScreen(
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top action bar
-            TopActionBar(
-                onSettingsClick = onNavigateToSettings,
-                onAnnounceClick = { viewModel.announceSpeed() },
-                accentCyan = accentCyan,
-                accentRed = accentRed,
-                textSec = textSec
-            )
-
             // Camera warning banner (above speedometer)
             if (camerasEnabled && state.nearestCameraDistanceM != null) {
                 val dist = state.nearestCameraDistanceM!!
@@ -121,33 +108,32 @@ fun DashboardScreen(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
             }
-            
-            // Speedometer centered in the remaining space
-            Box(
-                modifier = Modifier
-                    .fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Speedometer(
-                    speedKmh = state.speedKmh,
-                    alertState = state.alertState,
-                    speedLimit = speedLimit,
-                    roadSpeedLimit = state.roadSpeedLimit,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
+
+            Speedometer(
+                speedKmh = state.speedKmh,
+                alertState = state.alertState,
+                speedLimit = speedLimit,
+                roadSpeedLimit = state.roadSpeedLimit,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            BottomActionBar(
+                onSettingsClick = onNavigateToSettings,
+                accentRed = accentRed,
+                textSec = textSec
+            )
         }
     }
 }
 
 /**
- * Top action bar with navigation and quick actions.
+ * Bottom action bar — quit and settings.
  */
 @Composable
-private fun TopActionBar(
+private fun BottomActionBar(
     onSettingsClick: () -> Unit,
-    onAnnounceClick: () -> Unit,
-    accentCyan: androidx.compose.ui.graphics.Color = NeonCyan,
     accentRed: androidx.compose.ui.graphics.Color = NeonRed,
     textSec: androidx.compose.ui.graphics.Color = TextSecondary
 ) {
@@ -185,20 +171,7 @@ private fun TopActionBar(
                 modifier = Modifier.size(28.dp)
             )
         }
-        
-        // Center Area (Announce Action)
-        IconButton(
-            onClick = onAnnounceClick,
-            modifier = Modifier.size(48.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.VolumeUp,
-                contentDescription = "Announce Speed",
-                tint = accentCyan,
-                modifier = Modifier.size(28.dp)
-            )
-        }
-        
+
         // Settings button
         IconButton(
             onClick = onSettingsClick,
