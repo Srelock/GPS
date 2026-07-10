@@ -40,7 +40,6 @@ import javax.inject.Inject
  * 
  * Features:
  * - Continuous GPS tracking with partial wake lock
- * - Active trip recording with route point collection
  * - Speed monitoring with haptic alerts
  * - Weather updates based on location changes
  */

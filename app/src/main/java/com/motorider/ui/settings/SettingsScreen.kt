@@ -2,7 +2,6 @@ package com.motorider.ui.settings
 
 import android.content.Intent
 import android.net.Uri
-import android.widget.Toast
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.background
@@ -30,7 +29,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -60,19 +58,9 @@ import com.motorider.ui.theme.NeonCyan
 import com.motorider.ui.theme.NeonGreen
 import com.motorider.ui.theme.NeonOrange
 import com.motorider.ui.theme.NeonRed
-import com.motorider.ui.theme.NeonPurple
 import com.motorider.ui.theme.TextPrimary
 import com.motorider.ui.theme.TextSecondary
 import com.motorider.service.RadioPlayerService
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-
-/** Default route name when recording starts (local date & time). */
-private val routeRecordingNameFormatter: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("yyyy-MM-dd HH.mm.ss")
-
-private fun defaultRouteRecordingName(): String =
-    LocalDateTime.now().format(routeRecordingNameFormatter)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -92,15 +80,9 @@ fun SettingsScreen(
     // Speed cameras
     val camerasEnabled by viewModel.speedCamerasEnabled.collectAsState()
 
-    // Routes
-    val routesJson by viewModel.routesJson.collectAsState()
-    val activeRouteId by viewModel.activeRouteId.collectAsState()
-    val isRecording by viewModel.isRecordingRoute.collectAsState()
-
     val context = LocalContext.current
     var newStationName by remember { mutableStateOf("") }
     var newStationUrl by remember { mutableStateOf("") }
-    var newRouteName by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -192,7 +174,7 @@ fun SettingsScreen(
                             color = TextPrimary
                         )
                         Text(
-                            text = "Alerts within 150m",
+                            text = "Alerts within 100m",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
@@ -207,155 +189,6 @@ fun SettingsScreen(
                             uncheckedTrackColor = CardBackground
                         )
                     )
-                }
-            }
-
-            // ===== FAVOURITE ROUTES =====
-            SettingCard(title = "Favourite Routes") {
-                Text(
-                    text = "Save your commute for instant camera alerts",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Recording controls
-                if (isRecording) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = newRouteName,
-                            onValueChange = { newRouteName = it },
-                            label = { Text("Route name") },
-                            supportingText = {
-                                Text("Filled with date & time — edit if you like", color = TextSecondary)
-                            },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                        Button(
-                            onClick = {
-                                val name = newRouteName.trim().ifBlank { defaultRouteRecordingName() }
-                                val saved = viewModel.saveRouteRecording(name)
-                                if (saved) {
-                                    newRouteName = ""
-                                } else {
-                                    Toast.makeText(
-                                        context,
-                                        "Need at least two GPS points (ride ~100 m).",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = NeonGreen)
-                        ) { Text("Save", color = DarkBackground) }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        onClick = {
-                            viewModel.cancelRouteRecording()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = NeonRed),
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("Cancel Recording", color = TextPrimary) }
-                } else {
-                    Button(
-                        onClick = {
-                            newRouteName = defaultRouteRecordingName()
-                            viewModel.startRouteRecording()
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = NeonOrange)
-                    ) { Text("🔴 Start Recording Route", color = DarkBackground) }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Saved routes list
-                val routes = try {
-                    val arr = org.json.JSONArray(routesJson)
-                    buildList {
-                        for (i in 0 until arr.length()) {
-                            val obj = arr.optJSONObject(i) ?: continue
-                            val wpCount = obj.optJSONArray("waypoints")?.length() ?: 0
-                            add(Triple(
-                                obj.optString("id", ""),
-                                obj.optString("name", "?"),
-                                wpCount
-                            ))
-                        }
-                    }
-                } catch (_: Exception) { emptyList() }
-
-                if (routes.isEmpty()) {
-                    Text(
-                        text = "No routes saved yet.\nStart a recording while riding your commute.",
-                        color = TextSecondary,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                } else {
-                    Text(
-                        text = "Saved routes (${routes.size}/5)",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = TextSecondary,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = {
-                            if (routesJson.isBlank() || routesJson == "[]") {
-                                Toast.makeText(context, "No routes to export", Toast.LENGTH_SHORT).show()
-                            } else {
-                                val send = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_SUBJECT, "MotoRider routes.json")
-                                    putExtra(Intent.EXTRA_TEXT, routesJson)
-                                }
-                                context.startActivity(
-                                    Intent.createChooser(send, "Export for RideMapper")
-                                )
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Share routes for RideMapper", color = NeonCyan)
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    routes.forEach { (id, name, wpCount) ->
-                        val isActive = activeRouteId == id
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isActive) NeonCyan.copy(alpha = 0.1f) else CardBackground)
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    "$name · $wpCount pts",
-                                    color = TextPrimary,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                if (isActive) {
-                                    Text("Active – cameras pre-loaded", color = NeonCyan,
-                                        style = MaterialTheme.typography.bodySmall)
-                                }
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Button(
-                                    onClick = {
-                                        viewModel.setActiveRouteId(if (isActive) null else id)
-                                    }
-                                ) { Text(if (isActive) "Deselect" else "Set Active") }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                    }
                 }
             }
 

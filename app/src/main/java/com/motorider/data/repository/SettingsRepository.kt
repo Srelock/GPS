@@ -67,11 +67,6 @@ class SettingsRepository @Inject constructor(
         // HUD layout mode
         val HUD_MODE = stringPreferencesKey("hud_mode")
 
-        // Favourite routes
-        val ROUTES_JSON = stringPreferencesKey("routes_json")
-        val ACTIVE_ROUTE_ID = stringPreferencesKey("active_route_id")
-        val RECORDING_ROUTE = booleanPreferencesKey("recording_route")
-
         // Speed camera alerts
         val SPEED_CAMERAS_ENABLED = booleanPreferencesKey("speed_cameras_enabled")
         val SPEED_CAMERA_ALERT_DISTANCE = doublePreferencesKey("speed_camera_alert_distance")
@@ -157,28 +152,9 @@ class SettingsRepository @Inject constructor(
 
     val speedCameraAlertDistance: StateFlow<Double> = context.dataStore.data
         .map { preferences ->
-            preferences[PreferencesKeys.SPEED_CAMERA_ALERT_DISTANCE] ?: 150.0
+            preferences[PreferencesKeys.SPEED_CAMERA_ALERT_DISTANCE] ?: 100.0
         }
-        .stateIn(scope, SharingStarted.Eagerly, 150.0)
-
-    // Favourite routes
-    val routesJson: StateFlow<String> = context.dataStore.data
-        .map { preferences ->
-            preferences[PreferencesKeys.ROUTES_JSON] ?: "[]"
-        }
-        .stateIn(scope, SharingStarted.Eagerly, "[]")
-
-    val activeRouteId: StateFlow<String?> = context.dataStore.data
-        .map { preferences ->
-            preferences[PreferencesKeys.ACTIVE_ROUTE_ID]
-        }
-        .stateIn(scope, SharingStarted.Eagerly, null)
-
-    val isRecordingRoute: StateFlow<Boolean> = context.dataStore.data
-        .map { preferences ->
-            preferences[PreferencesKeys.RECORDING_ROUTE] ?: false
-        }
-        .stateIn(scope, SharingStarted.Eagerly, false)
+        .stateIn(scope, SharingStarted.Eagerly, 100.0)
 
     fun setSpeedLimit(limit: Double) {
         scope.launch {
@@ -273,28 +249,6 @@ class SettingsRepository @Inject constructor(
     fun setSpeedCamerasEnabled(enabled: Boolean) {
         scope.launch {
             context.dataStore.edit { it[PreferencesKeys.SPEED_CAMERAS_ENABLED] = enabled }
-        }
-    }
-
-    // Route setters
-    fun setRoutesJson(json: String) {
-        scope.launch {
-            context.dataStore.edit { it[PreferencesKeys.ROUTES_JSON] = json }
-        }
-    }
-
-    fun setActiveRouteId(id: String?) {
-        scope.launch {
-            context.dataStore.edit { preferences ->
-                if (id.isNullOrBlank()) preferences.remove(PreferencesKeys.ACTIVE_ROUTE_ID)
-                else preferences[PreferencesKeys.ACTIVE_ROUTE_ID] = id
-            }
-        }
-    }
-
-    fun setRecordingRoute(recording: Boolean) {
-        scope.launch {
-            context.dataStore.edit { it[PreferencesKeys.RECORDING_ROUTE] = recording }
         }
     }
 

@@ -31,7 +31,6 @@ class LocationRepository @Inject constructor(
     private val fusedLocationClient: FusedLocationProviderClient,
     private val roadSpeedRepository: RoadSpeedRepository,
     private val speedCameraRepository: SpeedCameraRepository,
-    private val routeRepository: RouteRepository,
     private val settingsRepository: SettingsRepository
 ) {
     private val _currentLocation = MutableStateFlow<Location?>(null)
@@ -83,7 +82,7 @@ class LocationRepository @Inject constructor(
         // Speed camera thresholds
         private const val CAMERA_FETCH_COOLDOWN_MS = 30000L     // 30 seconds
         private const val CAMERA_FETCH_MIN_DISTANCE_M = 500.0   // 500 meters
-        private const val CAMERA_ALERT_RANGE_M = 150f           // Show alert within 150m
+        private const val CAMERA_ALERT_RANGE_M = 100f           // Show alert within 100m
     }
     
     @SuppressLint("MissingPermission")
@@ -171,7 +170,6 @@ class LocationRepository @Inject constructor(
         checkAndFetchRoadSpeed(location)
         checkAndFetchCameras(location)
         checkCameraProximity(location)
-        recordRoutePoint(location)
         locationUpdates.tryEmit(location)
     }
 
@@ -216,10 +214,6 @@ class LocationRepository @Inject constructor(
         _nearestCameraDistance.value = nearest?.let { (_, dist) ->
             if (dist <= alertRange) dist else null
         }
-    }
-
-    private fun recordRoutePoint(location: Location) {
-        routeRepository.recordPoint(location.latitude, location.longitude)
     }
 
     /**

@@ -77,31 +77,6 @@ class SpeedCameraRepository @Inject constructor() {
     }
 
     /**
-     * Batch pre-fetch cameras along a list of waypoints (for favourite routes).
-     * Deduplicates by camera ID.
-     */
-    suspend fun prefetchAlongRoute(waypoints: List<Pair<Double, Double>>): List<SpeedCamera> {
-        val allCameras = mutableMapOf<Long, SpeedCamera>()
-
-        // Sample every ~500m along the route to avoid too many API calls
-        val sampledPoints = sampleWaypoints(waypoints, 500.0)
-
-        for (point in sampledPoints) {
-            val cameras = fetchFromOverpass(point.first, point.second)
-            cameras?.forEach { cam ->
-                allCameras[cam.id] = cam
-            }
-            // Small delay to avoid rate limiting
-            kotlinx.coroutines.delay(1000)
-        }
-
-        val result = allCameras.values.toList()
-        cachedCameras = result
-        lastFetchTime = System.currentTimeMillis()
-        return result
-    }
-
-    /**
      * Find the nearest camera to a given location and return distance in meters.
      * Returns null if no cameras are cached or none nearby.
      */
@@ -186,41 +161,4 @@ class SpeedCameraRepository @Inject constructor() {
                 null
             }
         }
-
-    /**
-     * Sample waypoints along a route at roughly the given interval in meters.
-     */
-    private fun sampleWaypoints(
-        waypoints: List<Pair<Double, Double>>,
-        intervalM: Double
-    ): List<Pair<Double, Double>> {
-        if (waypoints.size <= 1) return waypoints
-
-        val sampled = mutableListOf(waypoints.first())
-        var accumulated = 0.0
-
-        for (i in 1 until waypoints.size) {
-            val prev = Location("").apply {
-                latitude = waypoints[i - 1].first
-                longitude = waypoints[i - 1].second
-            }
-            val curr = Location("").apply {
-                latitude = waypoints[i].first
-                longitude = waypoints[i].second
-            }
-            accumulated += prev.distanceTo(curr)
-
-            if (accumulated >= intervalM) {
-                sampled.add(waypoints[i])
-                accumulated = 0.0
-            }
-        }
-
-        // Always include the last point
-        if (sampled.last() != waypoints.last()) {
-            sampled.add(waypoints.last())
-        }
-
-        return sampled
-    }
 }

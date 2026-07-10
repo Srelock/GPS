@@ -11,7 +11,6 @@ import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
-import android.widget.Toast
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.FrameLayout
@@ -48,7 +47,6 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.motorider.MainActivity
 import com.motorider.R
 import com.motorider.data.repository.LocationRepository
-import com.motorider.data.repository.RouteRepository
 import com.motorider.data.repository.SettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -57,8 +55,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -68,7 +64,6 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
 
     @Inject lateinit var locationRepository: LocationRepository
     @Inject lateinit var settingsRepository: SettingsRepository
-    @Inject lateinit var routeRepository: RouteRepository
 
     private val windowManager by lazy { getSystemService(Context.WINDOW_SERVICE) as WindowManager }
     private var overlayRoot: FrameLayout? = null
@@ -104,32 +99,6 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
         
         private const val MIN_WIDTH_DP = 160
         private const val MIN_HEIGHT_DP = 120
-
-        private val overlayRouteNameFormatter: DateTimeFormatter =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH.mm.ss")
-    }
-
-    private fun defaultOverlayRouteRecordingName(): String =
-        LocalDateTime.now().format(overlayRouteNameFormatter)
-
-    private fun startRouteRecordingFromOverlay() {
-        routeRepository.beginRecordingSession()
-        settingsRepository.setRecordingRoute(true)
-    }
-
-    private fun saveRouteRecordingFromOverlay() {
-        val name = defaultOverlayRouteRecordingName()
-        val ok = routeRepository.saveRecording(name)
-        if (ok) {
-            settingsRepository.setRecordingRoute(false)
-            Toast.makeText(this, "Route saved: $name", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(
-                this,
-                "Need at least two GPS points (~100 m apart). Keep riding, then save.",
-                Toast.LENGTH_LONG
-            ).show()
-        }
     }
 
     override fun onBind(intent: Intent): IBinder? {
@@ -256,8 +225,6 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
                         locationRepository = locationRepository,
                         settingsRepository = settingsRepository,
                         overlayWidthDp = overlayWidthDp.floatValue,
-                        onStartRouteRecording = { startRouteRecordingFromOverlay() },
-                        onSaveRouteRecording = { saveRouteRecordingFromOverlay() },
                         onClose = { stopOverlay() },
                         onMove = { dx, dy ->
                             params.x += dx.roundToInt()
@@ -398,51 +365,38 @@ private fun PulsingStatus() {
 }
 
 /**
- * Pulsing camera warning icon.
+ * Flashing red bars on the left and right edges of the overlay for camera warnings.
  */
 @Composable
-private fun PulsingCameraWarning(distanceM: Float) {
-    val infiniteTransition = rememberInfiniteTransition(label = "cameraPulse")
-
-    // Pulse faster when closer
-    val duration = if (distanceM < 150f) 400 else 800
+private fun CameraWarningSideBars() {
+    val infiniteTransition = rememberInfiniteTransition(label = "cameraFlash")
     val warnAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1.0f,
+        initialValue = 0.15f,
+        targetValue = 0.95f,
         animationSpec = infiniteRepeatable(
-            animation = tween(duration),
+            animation = tween(350),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "cameraAlpha"
+        label = "cameraBarAlpha"
     )
-
     val warnColor = com.motorider.ui.theme.NeonRed
-    val textColor = com.motorider.ui.theme.TextPrimary
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .alpha(warnAlpha)
-            .background(
-                warnColor.copy(alpha = 0.15f),
-                RoundedCornerShape(8.dp)
-            )
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
-    ) {
-        Text(
-            text = "⚠",
-            fontSize = 16.sp,
-            color = warnColor
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .fillMaxHeight()
+                .width(8.dp)
+                .alpha(warnAlpha)
+                .background(warnColor)
         )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = "CAMERA ${distanceM.toInt()}m",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.ExtraBold,
-            color = textColor,
-            letterSpacing = 1.sp
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .width(8.dp)
+                .alpha(warnAlpha)
+                .background(warnColor)
         )
     }
 }
@@ -452,8 +406,6 @@ private fun OverlayWindow(
     locationRepository: LocationRepository,
     settingsRepository: SettingsRepository,
     overlayWidthDp: Float,
-    onStartRouteRecording: () -> Unit,
-    onSaveRouteRecording: () -> Unit,
     onClose: () -> Unit,
     onMove: (Float, Float) -> Unit,
     onResize: (Float, Float) -> Unit,
@@ -467,7 +419,6 @@ private fun OverlayWindow(
 
     // HUD mode
     val hudMode by settingsRepository.hudMode.collectAsState()
-    val isRecordingRoute by settingsRepository.isRecordingRoute.collectAsState()
 
     // Speed camera distance
     val cameraDistM by locationRepository.nearestCameraDistance.collectAsState()
@@ -497,6 +448,7 @@ private fun OverlayWindow(
         border = androidx.compose.foundation.BorderStroke(1.dp, accentCyan.copy(alpha = 0.4f)),
         shadowElevation = 12.dp
     ) {
+        Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             // Futuristic Header / Drag Area — Taller for easier grabbing
             Row(
@@ -578,12 +530,6 @@ private fun OverlayWindow(
                     }
             ) {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    // === SPEED CAMERA WARNING (shown if alerts enabled and camera nearby) ===
-                    if (showAlerts && camerasEnabled && cameraDistM != null) {
-                        PulsingCameraWarning(distanceM = cameraDistM!!)
-                        Spacer(modifier = Modifier.height(8.dp))
-                    }
-
                     // === SPEED READOUT (always shown) ===
                     val scaledSpeedSize = (overlayWidthDp / 3.2f).coerceIn(40f, 180f).sp
                     val scaledUnitSize = (overlayWidthDp / 14f).coerceIn(10f, 32f).sp
@@ -767,63 +713,6 @@ private fun OverlayWindow(
                                     }
                                 }
                             }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Divider(
-                                modifier = Modifier.fillMaxWidth(0.75f).align(Alignment.CenterHorizontally),
-                                thickness = 1.dp,
-                                color = accentCyan.copy(alpha = 0.15f)
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            val recContext = androidx.compose.ui.platform.LocalContext.current
-                            if (!isRecordingRoute) {
-                                Surface(
-                                    onClick = {
-                                        onStartRouteRecording()
-                                        Toast.makeText(
-                                            recContext,
-                                            "Recording — ride ~100 m, then Save route",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = com.motorider.ui.theme.CardBackground,
-                                    modifier = Modifier
-                                        .fillMaxWidth(0.92f)
-                                        .align(Alignment.CenterHorizontally),
-                                    border = androidx.compose.foundation.BorderStroke(
-                                        1.dp,
-                                        com.motorider.ui.theme.NeonOrange.copy(alpha = 0.7f)
-                                    )
-                                ) {
-                                    Text(
-                                        text = "● Start recording",
-                                        modifier = Modifier.padding(vertical = 8.dp, horizontal = 12.dp),
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.Bold,
-                                        color = com.motorider.ui.theme.NeonOrange
-                                    )
-                                }
-                            } else {
-                                Surface(
-                                    onClick = { onSaveRouteRecording() },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = accentGreen.copy(alpha = 0.15f),
-                                    modifier = Modifier
-                                        .fillMaxWidth(0.92f)
-                                        .align(Alignment.CenterHorizontally),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, accentGreen)
-                                ) {
-                                    Text(
-                                        text = "■ Save route",
-                                        modifier = Modifier.padding(vertical = 8.dp, horizontal = 12.dp),
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.Bold,
-                                        color = accentGreen
-                                    )
-                                }
-                            }
                         }
                     }
                 }
@@ -857,6 +746,12 @@ private fun OverlayWindow(
                             .align(Alignment.BottomEnd)
                     )
                 }
+            }
+        }
+
+            // Camera warning: flash red bars on left and right edges (no distance text)
+            if (showAlerts && camerasEnabled && cameraDistM != null) {
+                CameraWarningSideBars()
             }
         }
     }

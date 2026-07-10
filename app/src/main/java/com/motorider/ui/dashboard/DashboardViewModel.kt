@@ -9,7 +9,6 @@ import com.motorider.core.audio.BluetoothAudioManager
 import com.motorider.data.repository.LocationRepository
 import com.motorider.data.repository.RadioBrowserRepository
 import com.motorider.data.repository.RadioBrowserStation
-import com.motorider.data.repository.RouteRepository
 import com.motorider.data.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,7 +30,6 @@ class DashboardViewModel @Inject constructor(
     private val hapticAlertManager: HapticSpeedAlertManager,
     private val audioManager: BluetoothAudioManager,
     private val settingsRepository: SettingsRepository,
-    private val routeRepository: RouteRepository,
     private val radioBrowserRepository: RadioBrowserRepository
 ) : ViewModel() {
 
@@ -62,11 +60,6 @@ class DashboardViewModel @Inject constructor(
     val speedCameraAlertDistance: StateFlow<Double> = settingsRepository.speedCameraAlertDistance
     val nearestCameraDistance: StateFlow<Float?> = locationRepository.nearestCameraDistance
 
-    // Routes
-    val routesJson: StateFlow<String> = settingsRepository.routesJson
-    val activeRouteId: StateFlow<String?> = settingsRepository.activeRouteId
-    val isRecordingRoute: StateFlow<Boolean> = settingsRepository.isRecordingRoute
-    
     // Current state from repositories
     val currentSpeed: StateFlow<Double> = locationRepository.currentSpeed
     val alertState: StateFlow<SpeedAlertState> = hapticAlertManager.alertState
@@ -89,7 +82,7 @@ class DashboardViewModel @Inject constructor(
     )
     
     init {
-        setSpeedCameraAlertDistance(150.0)
+        setSpeedCameraAlertDistance(100.0)
         // Keep GPS active on the dashboard even if the foreground service is delayed (emulator/testing).
         viewModelScope.launch {
             locationRepository.startLocationUpdates(highAccuracy = true).collect { }
@@ -222,42 +215,6 @@ class DashboardViewModel @Inject constructor(
         settingsRepository.setSpeedCameraAlertDistance(distanceM)
     }
 
-    // Routes
-    fun setRoutesJson(json: String) {
-        settingsRepository.setRoutesJson(json)
-    }
-
-    fun setActiveRouteId(id: String?) {
-        settingsRepository.setActiveRouteId(id)
-    }
-
-    fun setRecordingRoute(recording: Boolean) {
-        settingsRepository.setRecordingRoute(recording)
-    }
-
-    /** Clears the buffer and enables GPS capture for a new route. */
-    fun startRouteRecording() {
-        routeRepository.beginRecordingSession()
-        settingsRepository.setRecordingRoute(true)
-    }
-
-    fun cancelRouteRecording() {
-        routeRepository.endRecordingSession()
-        settingsRepository.setRecordingRoute(false)
-    }
-
-    /**
-     * Persists the in-memory recording buffer as a named route.
-     * @return false if the route is too short or the name is blank.
-     */
-    fun saveRouteRecording(name: String): Boolean {
-        val trimmed = name.trim()
-        if (trimmed.isBlank()) return false
-        if (!routeRepository.saveRecording(trimmed)) return false
-        settingsRepository.setRecordingRoute(false)
-        return true
-    }
-    
     /**
      * Announce current speed via Bluetooth audio.
      */
