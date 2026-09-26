@@ -19,6 +19,9 @@ val NeonPurple = Color(0xFFBF00FF)     // Accent / Special
 val DarkBackground = Color(0xFF0D0D0D)  // Near-black primary background
 val CardBackground = Color(0xFF1A1A1A)  // Elevated card surfaces
 val SurfaceDark = Color(0xFF252525)     // Secondary surfaces
+val DialBackground = Color(0xFF0F1115)  // Floating dial HUD panel
+val DialTrack = Color(0xFF2A2E36)       // Inactive speed ring track
+val DialLime = Color(0xFFB4FF3C)        // Active dial ring (instrument lime)
 
 // Text Colors
 val TextPrimary = Color(0xFFFFFFFF)     // Primary text - pure white

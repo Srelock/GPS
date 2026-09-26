@@ -113,15 +113,15 @@ class SettingsRepository @Inject constructor(
 
     val overlayWidth: StateFlow<Double> = context.dataStore.data
         .map { preferences ->
-            preferences[PreferencesKeys.OVERLAY_WIDTH] ?: 200.0
+            preferences[PreferencesKeys.OVERLAY_WIDTH] ?: 220.0
         }
-        .stateIn(scope, SharingStarted.Eagerly, 200.0)
+        .stateIn(scope, SharingStarted.Eagerly, 220.0)
 
     val overlayHeight: StateFlow<Double> = context.dataStore.data
         .map { preferences ->
-            preferences[PreferencesKeys.OVERLAY_HEIGHT] ?: 150.0
+            preferences[PreferencesKeys.OVERLAY_HEIGHT] ?: 300.0
         }
-        .stateIn(scope, SharingStarted.Eagerly, 150.0)
+        .stateIn(scope, SharingStarted.Eagerly, 300.0)
 
     val radioStations: StateFlow<List<RadioStation>> = context.dataStore.data
         .map { preferences ->

@@ -1,4 +1,4 @@
-package com.motorider.service
+﻿package com.motorider.service
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -14,24 +14,61 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.FrameLayout
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material3.*
-import androidx.compose.animation.core.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationCompat
@@ -48,6 +85,14 @@ import com.motorider.MainActivity
 import com.motorider.R
 import com.motorider.data.repository.LocationRepository
 import com.motorider.data.repository.SettingsRepository
+import com.motorider.ui.theme.DialBackground
+import com.motorider.ui.theme.DialLime
+import com.motorider.ui.theme.DialTrack
+import com.motorider.ui.theme.NeonOrange
+import com.motorider.ui.theme.NeonRed
+import com.motorider.ui.theme.SurfaceDark
+import com.motorider.ui.theme.TextPrimary
+import com.motorider.ui.theme.TextSecondary
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -58,6 +103,9 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.math.max
 import kotlin.math.roundToInt
+
+/** Dial / progress fill scale — motorcycle top speed. */
+private const val MOTORCYCLE_MAX_MPH = 33.0
 
 @AndroidEntryPoint
 class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegistryOwner {
@@ -87,7 +135,7 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
         const val ACTION_START = "com.motorider.action.OVERLAY_START"
         const val ACTION_STOP = "com.motorider.action.OVERLAY_STOP"
 
-        /** True after [promoteToForeground] — set synchronously on each FGS start. */
+        /** True after [promoteToForeground] â€” set synchronously on each FGS start. */
         @Volatile
         var isForegroundActive: Boolean = false
             private set
@@ -97,8 +145,8 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
         var isOverlayActive: Boolean = false
             private set
         
-        private const val MIN_WIDTH_DP = 160
-        private const val MIN_HEIGHT_DP = 120
+        private const val MIN_WIDTH_DP = 180
+        private const val MIN_HEIGHT_DP = 240
     }
 
     override fun onBind(intent: Intent): IBinder? {
@@ -122,7 +170,7 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
                 return START_NOT_STICKY
             }
         }
-        // Must run before super and before any async work — satisfies every startForegroundService().
+        // Must run before super and before any async work â€” satisfies every startForegroundService().
         promoteToForeground()
         super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
@@ -220,39 +268,35 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
             setViewTreeSavedStateRegistryOwner(this@OverlayService)
             
             setContent {
-                MaterialTheme {
-                    OverlayWindow(
-                        locationRepository = locationRepository,
-                        settingsRepository = settingsRepository,
-                        overlayWidthDp = overlayWidthDp.floatValue,
-                        onClose = { stopOverlay() },
-                        onMove = { dx, dy ->
-                            params.x += dx.roundToInt()
-                            params.y += dy.roundToInt()
-                            windowManager.updateViewLayout(root, params)
-                        },
-                        onResize = { dw, dh ->
-                            val minWidthPx = (MIN_WIDTH_DP * density).toInt()
-                            val minHeightPx = (MIN_HEIGHT_DP * density).toInt()
-                            
-                            params.width = max(minWidthPx, params.width + dw.roundToInt())
-                            params.height = max(minHeightPx, params.height + dh.roundToInt())
-                            windowManager.updateViewLayout(root, params)
-                            // Update the state so Compose recomposes with new size
-                            overlayWidthDp.floatValue = params.width.toFloat() / density
-                        },
-                        onActionFinished = {
-                            // Convert back to logical DP for storage
-                            val currentDensity = resources.displayMetrics.density
-                            settingsRepository.setOverlayBounds(
-                                params.x.toDouble() / currentDensity,
-                                params.y.toDouble() / currentDensity,
-                                params.width.toDouble() / currentDensity,
-                                params.height.toDouble() / currentDensity
-                            )
-                        }
-                    )
-                }
+                OverlayWindow(
+                    locationRepository = locationRepository,
+                    settingsRepository = settingsRepository,
+                    overlayWidthDp = overlayWidthDp.floatValue,
+                    onClose = { stopOverlay() },
+                    onMove = { dx, dy ->
+                        params.x += dx.roundToInt()
+                        params.y += dy.roundToInt()
+                        windowManager.updateViewLayout(root, params)
+                    },
+                    onResize = { dw, dh ->
+                        val minWidthPx = (MIN_WIDTH_DP * density).toInt()
+                        val minHeightPx = (MIN_HEIGHT_DP * density).toInt()
+
+                        params.width = max(minWidthPx, params.width + dw.roundToInt())
+                        params.height = max(minHeightPx, params.height + dh.roundToInt())
+                        windowManager.updateViewLayout(root, params)
+                        overlayWidthDp.floatValue = params.width.toFloat() / density
+                    },
+                    onActionFinished = {
+                        val currentDensity = resources.displayMetrics.density
+                        settingsRepository.setOverlayBounds(
+                            params.x.toDouble() / currentDensity,
+                            params.y.toDouble() / currentDensity,
+                            params.width.toDouble() / currentDensity,
+                            params.height.toDouble() / currentDensity
+                        )
+                    }
+                )
             }
         }
         root.addView(
@@ -344,30 +388,6 @@ class OverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateRegist
 }
 
 @Composable
-private fun PulsingStatus() {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "alpha"
-    )
-    
-    Box(
-        modifier = Modifier
-            .size(6.dp)
-            .alpha(alpha)
-            .background(com.motorider.ui.theme.NeonGreen, androidx.compose.foundation.shape.CircleShape)
-    )
-}
-
-/**
- * Flashing red bars on the left and right edges of the overlay for camera warnings.
- */
-@Composable
 private fun CameraWarningSideBars() {
     val infiniteTransition = rememberInfiniteTransition(label = "cameraFlash")
     val warnAlpha by infiniteTransition.animateFloat(
@@ -379,25 +399,152 @@ private fun CameraWarningSideBars() {
         ),
         label = "cameraBarAlpha"
     )
-    val warnColor = com.motorider.ui.theme.NeonRed
 
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
                 .fillMaxHeight()
-                .width(8.dp)
+                .width(6.dp)
                 .alpha(warnAlpha)
-                .background(warnColor)
+                .background(NeonRed, RoundedCornerShape(topEnd = 3.dp, bottomEnd = 3.dp))
         )
         Box(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
-                .width(8.dp)
+                .width(6.dp)
                 .alpha(warnAlpha)
-                .background(warnColor)
+                .background(NeonRed, RoundedCornerShape(topStart = 3.dp, bottomStart = 3.dp))
         )
+    }
+}
+
+@Composable
+private fun OverlaySpeedDial(
+    speed: Double,
+    unitLabel: String,
+    roadLimit: Double?,
+    ringColor: Color,
+    speedFraction: Float,
+    dialSizeDp: Float
+) {
+    val animatedFraction by animateFloatAsState(
+        targetValue = speedFraction.coerceIn(0f, 1f),
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "dialProgress"
+    )
+
+    // Glance-first: large digits; bike tops out at ~33 mph so 2 digits stay huge.
+    val speedSize = (dialSizeDp * 0.40f).coerceIn(52f, 100f).sp
+    val unitSize = (dialSizeDp * 0.07f).coerceIn(11f, 18f).sp
+    val limitSize = (dialSizeDp * 0.22f).coerceIn(36f, 56f).dp
+    val strokeDp = (dialSizeDp * 0.05f).coerceIn(8f, 14f).dp
+
+    Box(
+        modifier = Modifier.size(dialSizeDp.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val stroke = strokeDp.toPx()
+            val diameter = size.minDimension - stroke
+            val topLeft = Offset(
+                (size.width - diameter) / 2f,
+                (size.height - diameter) / 2f
+            )
+            val arcSize = Size(diameter, diameter)
+            val startAngle = 135f
+            val maxSweep = 270f
+
+            drawArc(
+                color = DialTrack,
+                startAngle = startAngle,
+                sweepAngle = maxSweep,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round)
+            )
+            drawArc(
+                color = ringColor,
+                startAngle = startAngle,
+                sweepAngle = maxSweep * animatedFraction,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round)
+            )
+        }
+
+        // Speed sits slightly above center so the limit badge has room in the arc gap.
+        Column(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .padding(bottom = limitSize * 0.55f),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "${speed.toInt()}",
+                color = TextPrimary,
+                fontWeight = FontWeight.Black,
+                fontSize = speedSize,
+                letterSpacing = (-1).sp,
+                maxLines = 1
+            )
+            Text(
+                text = unitLabel,
+                color = TextSecondary,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = unitSize
+            )
+        }
+
+        // Road speed-limit sign — pinned in the open bottom of the dial (never clipped by digits).
+        if (roadLimit != null) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 2.dp)
+                    .size(limitSize),
+                shape = CircleShape,
+                color = Color.White,
+                border = BorderStroke(3.dp, Color.Red),
+                shadowElevation = 4.dp
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "${Math.round(roadLimit).toInt()}",
+                        color = Color.Black,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = (limitSize.value * 0.45f).sp,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DialMediaButton(
+    onClick: () -> Unit,
+    emphasized: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    val size = if (emphasized) 52.dp else 44.dp
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = SurfaceDark,
+        modifier = Modifier.size(size),
+        border = BorderStroke(1.dp, TextSecondary.copy(alpha = 0.25f))
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            content()
+        }
     }
 }
 
@@ -416,67 +563,78 @@ private fun OverlayWindow(
     val stations by settingsRepository.radioStations.collectAsState()
     val selectedId by settingsRepository.selectedStationId.collectAsState()
     val selectedStation = stations.firstOrNull { it.id == selectedId } ?: stations.firstOrNull()
-
-    // HUD mode
     val hudMode by settingsRepository.hudMode.collectAsState()
-
-    // Speed camera distance
     val cameraDistM by locationRepository.nearestCameraDistance.collectAsState()
     val camerasEnabled by settingsRepository.speedCamerasEnabled.collectAsState()
+    val roadLimitKmh by locationRepository.roadSpeedLimit.collectAsState()
 
-    // Show sections based on HUD mode
     val showRadio = hudMode == SettingsRepository.HudMode.SPEED_RADIO ||
-            hudMode == SettingsRepository.HudMode.FULL_HUD
+        hudMode == SettingsRepository.HudMode.FULL_HUD
     val showAlerts = hudMode == SettingsRepository.HudMode.SPEED_ALERTS ||
-            hudMode == SettingsRepository.HudMode.FULL_HUD
+        hudMode == SettingsRepository.HudMode.FULL_HUD
 
-    // Real-time playing state check via Service (rough proxy)
     var isPlaying by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
-    // Fixed styling (night mode removed). Keep overlay opaque to avoid blending with background.
-    val bgAlpha = 1.0f
-    val accentCyan = com.motorider.ui.theme.NeonCyan
-    val accentGreen = com.motorider.ui.theme.NeonGreen
-    val accentRed = com.motorider.ui.theme.NeonRed
-    val textMain = com.motorider.ui.theme.TextPrimary
-    val textSec = com.motorider.ui.theme.TextSecondary
+    val displaySpeed = if (useMph) speedKmh * 0.621371 else speedKmh
+    val unitLabel = if (useMph) "mph" else "km/h"
+    val displayRoadLimit = roadLimitKmh?.let { if (useMph) it * 0.621371 else it }
+
+    // Motorcycle max ~33 mph — ring fills at that speed (convert if showing km/h).
+    val bikeMaxSpeed = if (useMph) MOTORCYCLE_MAX_MPH else MOTORCYCLE_MAX_MPH / 0.621371
+    val speedFraction = (displaySpeed / bikeMaxSpeed).toFloat().coerceIn(0f, 1f)
+
+    val limitValue = displayRoadLimit
+    val overLimit = limitValue != null && displaySpeed > limitValue
+    val ringColor = when {
+        limitValue != null && displaySpeed > limitValue * 1.1 -> NeonRed
+        overLimit -> NeonOrange
+        else -> DialLime
+    }
+
+    val dialSize = (overlayWidthDp * 0.84f).coerceIn(160f, 260f)
+
+    val dragModifier = Modifier.pointerInput(Unit) {
+        detectDragGestures(
+            onDrag = { change, dragAmount ->
+                change.consume()
+                onMove(dragAmount.x, dragAmount.y)
+            },
+            onDragEnd = { onActionFinished() }
+        )
+    }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
-        shape = RoundedCornerShape(16.dp),
-        color = com.motorider.ui.theme.DarkBackground.copy(alpha = bgAlpha),
-        border = androidx.compose.foundation.BorderStroke(1.dp, accentCyan.copy(alpha = 0.4f)),
-        shadowElevation = 12.dp
+        shape = RoundedCornerShape(24.dp),
+        color = DialBackground,
+        shadowElevation = 10.dp
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Futuristic Header / Drag Area — Taller for easier grabbing
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .background(com.motorider.ui.theme.CardBackground.copy(alpha = 0.5f))
-                    .pointerInput(Unit) {
-                        detectDragGestures(
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                onMove(dragAmount.x, dragAmount.y)
-                            },
-                            onDragEnd = { onActionFinished() }
-                        )
-                    }
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                val context = androidx.compose.ui.platform.LocalContext.current
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(40.dp)
+                        .then(dragModifier)
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
                     IconButton(
                         onClick = {
-                            // Stop All from Overlay
-                            val radioIntent = Intent(context, RadioPlayerService::class.java).apply { action = RadioPlayerService.ACTION_STOP }
-                            val overlayIntent = Intent(context, OverlayService::class.java).apply { action = OverlayService.ACTION_STOP }
-                            val locIntent = Intent(context, LocationForegroundService::class.java).apply { action = LocationForegroundService.ACTION_STOP }
+                            val radioIntent = Intent(context, RadioPlayerService::class.java).apply {
+                                action = RadioPlayerService.ACTION_STOP
+                            }
+                            val overlayIntent = Intent(context, OverlayService::class.java).apply {
+                                action = OverlayService.ACTION_STOP
+                            }
+                            val locIntent = Intent(
+                                context,
+                                LocationForegroundService::class.java
+                            ).apply {
+                                action = LocationForegroundService.ACTION_STOP
+                            }
                             context.startService(radioIntent)
                             context.startService(overlayIntent)
                             context.startService(locIntent)
@@ -484,275 +642,219 @@ private fun OverlayWindow(
                         modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Close, 
+                            imageVector = Icons.Default.PowerSettingsNew,
                             contentDescription = "Stop All",
-                            modifier = Modifier.size(20.dp),
-                            tint = accentRed
+                            modifier = Modifier.size(18.dp),
+                            tint = NeonRed
                         )
                     }
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = "HUD",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 1.sp,
-                        color = accentCyan
-                    )
-                }
-                
-                IconButton(
-                    onClick = onClose,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close HUD Only",
-                        modifier = Modifier.size(18.dp),
-                        tint = textSec
-                    )
-                }
-            }
 
-            // Main Display Area - Also made draggable for easier movement
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(12.dp)
-                    .pointerInput(Unit) {
-                        detectDragGestures(
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                onMove(dragAmount.x, dragAmount.y)
-                            },
-                            onDragEnd = { onActionFinished() }
-                        )
-                    }
-            ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    // === SPEED READOUT (always shown) ===
-                    val scaledSpeedSize = (overlayWidthDp / 3.2f).coerceIn(40f, 180f).sp
-                    val scaledUnitSize = (overlayWidthDp / 14f).coerceIn(10f, 32f).sp
-                    val unitPadding = (overlayWidthDp / 30f).coerceIn(4f, 20f).dp
-
-                    val displaySpeed = if (useMph) speedKmh * 0.621371 else speedKmh
-                    val roadLimit by locationRepository.roadSpeedLimit.collectAsState()
-                    val displayRoadLimit = roadLimit?.let { if (useMph) it * 0.621371 else it }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // 1. Speed Limit Sign (LEFT)
-                        displayRoadLimit?.let { limit ->
-                            Surface(
-                                modifier = Modifier
-                                    .size((scaledSpeedSize.value * 0.45f).dp),
-                                shape = androidx.compose.foundation.shape.CircleShape,
-                                color = androidx.compose.ui.graphics.Color.White,
-                                border = androidx.compose.foundation.BorderStroke(3.dp, androidx.compose.ui.graphics.Color.Red),
-                                shadowElevation = 4.dp
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = "${Math.round(limit).toInt()}",
-                                        color = androidx.compose.ui.graphics.Color.Black,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = (scaledSpeedSize.value * 0.22f).sp
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.width(20.dp))
-                        }
-
-                        // 2. Current Speed (RIGHT)
-                        Text(
-                            text = "${displaySpeed.toInt()}",
-                            style = androidx.compose.ui.text.TextStyle(
-                                fontSize = scaledSpeedSize,
-                                fontWeight = FontWeight.Black,
-                                color = accentCyan
+                    Box(
+                        modifier = Modifier
+                            .width(28.dp)
+                            .height(3.dp)
+                            .background(
+                                TextSecondary.copy(alpha = 0.35f),
+                                RoundedCornerShape(2.dp)
                             )
+                    )
+
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close HUD",
+                            modifier = Modifier.size(18.dp),
+                            tint = TextSecondary
                         )
-                    }
-
-                    // === RADIO SECTION (conditional) ===
-                    if (showRadio) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Divider(
-                            modifier = Modifier.fillMaxWidth(0.6f).align(Alignment.CenterHorizontally),
-                            thickness = 1.dp,
-                            color = accentCyan.copy(alpha = 0.2f)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Media Status
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (isPlaying) {
-                                    PulsingStatus()
-                                    Spacer(Modifier.width(8.dp))
-                                }
-                                Text(
-                                    text = selectedStation?.name ?: "NO STATION",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isPlaying) accentGreen else textSec,
-                                    maxLines = 1
-                                )
-                            }
-                            
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                val context = androidx.compose.ui.platform.LocalContext.current
-                                
-                                // Play Button
-                                Surface(
-                                    onClick = {
-                                        val station = selectedStation ?: return@Surface
-                                        val intent = Intent(context, RadioPlayerService::class.java).apply {
-                                            action = RadioPlayerService.ACTION_PLAY
-                                            putExtra(RadioPlayerService.EXTRA_STATION_NAME, station.name)
-                                            putExtra(RadioPlayerService.EXTRA_STATION_URL, station.url)
-                                        }
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                            context.startForegroundService(intent)
-                                        } else {
-                                            context.startService(intent)
-                                        }
-                                        isPlaying = true
-                                    },
-                                    shape = androidx.compose.foundation.shape.CircleShape,
-                                    color = if (isPlaying) accentGreen.copy(alpha = 0.1f) else com.motorider.ui.theme.CardBackground,
-                                    modifier = Modifier.size(44.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isPlaying) accentGreen else textSec.copy(alpha = 0.5f))
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            painter = painterResource(id = android.R.drawable.ic_media_play),
-                                            contentDescription = "Play",
-                                            modifier = Modifier.size(24.dp),
-                                            tint = if (isPlaying) accentGreen else textMain
-                                        )
-                                    }
-                                }
-
-                                Spacer(Modifier.width(20.dp))
-
-                                // Pause Button
-                                Surface(
-                                    onClick = {
-                                        val intent = Intent(context, RadioPlayerService::class.java).apply {
-                                            action = RadioPlayerService.ACTION_PAUSE
-                                        }
-                                        context.startService(intent)
-                                        isPlaying = false
-                                    },
-                                    shape = androidx.compose.foundation.shape.CircleShape,
-                                    color = com.motorider.ui.theme.CardBackground,
-                                    modifier = Modifier.size(44.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, textSec.copy(alpha = 0.5f))
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            painter = painterResource(id = android.R.drawable.ic_media_pause),
-                                            contentDescription = "Pause",
-                                            modifier = Modifier.size(24.dp),
-                                            tint = textMain
-                                        )
-                                    }
-                                }
-                                
-                                Spacer(Modifier.width(20.dp))
-                                
-                                // Next Station Button
-                                Surface(
-                                    onClick = {
-                                        if (stations.isEmpty()) return@Surface
-                                        val currentIndex = stations.indexOfFirst { it.id == selectedId }
-                                        val nextIndex = if (currentIndex == -1) 0 else (currentIndex + 1) % stations.size
-                                        val nextStation = stations[nextIndex]
-                                        
-                                        // 1. Update selected station in settings so it reflects everywhere
-                                        settingsRepository.setSelectedStation(nextStation.id)
-                                        
-                                        // 2. Play the new station immediately
-                                        val intent = Intent(context, RadioPlayerService::class.java).apply {
-                                            action = RadioPlayerService.ACTION_PLAY
-                                            putExtra(RadioPlayerService.EXTRA_STATION_NAME, nextStation.name)
-                                            putExtra(RadioPlayerService.EXTRA_STATION_URL, nextStation.url)
-                                        }
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                            context.startForegroundService(intent)
-                                        } else {
-                                            context.startService(intent)
-                                        }
-                                        isPlaying = true
-                                    },
-                                    shape = androidx.compose.foundation.shape.CircleShape,
-                                    color = com.motorider.ui.theme.CardBackground,
-                                    modifier = Modifier.size(44.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, textSec.copy(alpha = 0.5f))
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = androidx.compose.material.icons.Icons.Default.SkipNext,
-                                            contentDescription = "Next Station",
-                                            modifier = Modifier.size(24.dp),
-                                            tint = textMain
-                                        )
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
 
-                // Precision Resize Handle
                 Box(
                     modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .size(20.dp)
-                        .pointerInput(Unit) {
-                            detectDragGestures(
-                                onDrag = { change, dragAmount ->
-                                    change.consume()
-                                    onResize(dragAmount.x, dragAmount.y)
-                                },
-                                onDragEnd = { onActionFinished() }
-                            )
-                        },
-                    contentAlignment = Alignment.BottomEnd
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .then(dragModifier)
                 ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            OverlaySpeedDial(
+                                speed = displaySpeed,
+                                unitLabel = unitLabel,
+                                roadLimit = displayRoadLimit,
+                                ringColor = ringColor,
+                                speedFraction = speedFraction,
+                                dialSizeDp = dialSize
+                            )
+                        }
+
+                        if (showRadio) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = selectedStation?.name ?: "No station",
+                                    color = if (isPlaying) DialLime else TextSecondary,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    DialMediaButton(
+                                        onClick = {
+                                            val station = selectedStation ?: return@DialMediaButton
+                                            val intent = Intent(
+                                                context,
+                                                RadioPlayerService::class.java
+                                            ).apply {
+                                                action = RadioPlayerService.ACTION_PLAY
+                                                putExtra(
+                                                    RadioPlayerService.EXTRA_STATION_NAME,
+                                                    station.name
+                                                )
+                                                putExtra(
+                                                    RadioPlayerService.EXTRA_STATION_URL,
+                                                    station.url
+                                                )
+                                            }
+                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                                context.startForegroundService(intent)
+                                            } else {
+                                                context.startService(intent)
+                                            }
+                                            isPlaying = true
+                                        }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.PlayArrow,
+                                            contentDescription = "Play",
+                                            modifier = Modifier.size(24.dp),
+                                            tint = TextPrimary
+                                        )
+                                    }
+
+                                    DialMediaButton(
+                                        onClick = {
+                                            val intent = Intent(
+                                                context,
+                                                RadioPlayerService::class.java
+                                            ).apply {
+                                                action = RadioPlayerService.ACTION_PAUSE
+                                            }
+                                            context.startService(intent)
+                                            isPlaying = false
+                                        },
+                                        emphasized = true
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Pause,
+                                            contentDescription = "Pause",
+                                            modifier = Modifier.size(26.dp),
+                                            tint = TextPrimary
+                                        )
+                                    }
+
+                                    DialMediaButton(
+                                        onClick = {
+                                            if (stations.isEmpty()) return@DialMediaButton
+                                            val currentIndex =
+                                                stations.indexOfFirst { it.id == selectedId }
+                                            val nextIndex = if (currentIndex == -1) {
+                                                0
+                                            } else {
+                                                (currentIndex + 1) % stations.size
+                                            }
+                                            val nextStation = stations[nextIndex]
+                                            settingsRepository.setSelectedStation(nextStation.id)
+                                            val intent = Intent(
+                                                context,
+                                                RadioPlayerService::class.java
+                                            ).apply {
+                                                action = RadioPlayerService.ACTION_PLAY
+                                                putExtra(
+                                                    RadioPlayerService.EXTRA_STATION_NAME,
+                                                    nextStation.name
+                                                )
+                                                putExtra(
+                                                    RadioPlayerService.EXTRA_STATION_URL,
+                                                    nextStation.url
+                                                )
+                                            }
+                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                                context.startForegroundService(intent)
+                                            } else {
+                                                context.startService(intent)
+                                            }
+                                            isPlaying = true
+                                        }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.SkipNext,
+                                            contentDescription = "Next Station",
+                                            modifier = Modifier.size(24.dp),
+                                            tint = TextPrimary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     Box(
                         modifier = Modifier
-                            .size(10.dp, 2.dp)
-                            .background(accentCyan.copy(alpha = 0.6f))
                             .align(Alignment.BottomEnd)
-                    )
-                    Box(
-                        modifier = Modifier
-                            .size(2.dp, 10.dp)
-                            .background(accentCyan.copy(alpha = 0.6f))
-                            .align(Alignment.BottomEnd)
-                    )
+                            .size(22.dp)
+                            .pointerInput(Unit) {
+                                detectDragGestures(
+                                    onDrag = { change, dragAmount ->
+                                        change.consume()
+                                        onResize(dragAmount.x, dragAmount.y)
+                                    },
+                                    onDragEnd = { onActionFinished() }
+                                )
+                            },
+                        contentAlignment = Alignment.BottomEnd
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp, 2.dp)
+                                .background(TextSecondary.copy(alpha = 0.45f))
+                                .align(Alignment.BottomEnd)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(2.dp, 10.dp)
+                                .background(TextSecondary.copy(alpha = 0.45f))
+                                .align(Alignment.BottomEnd)
+                        )
+                    }
                 }
             }
-        }
 
-            // Camera warning: flash red bars on left and right edges (no distance text)
             if (showAlerts && camerasEnabled && cameraDistM != null) {
                 CameraWarningSideBars()
             }
         }
     }
 }
+

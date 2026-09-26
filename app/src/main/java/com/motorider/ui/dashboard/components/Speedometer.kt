@@ -39,8 +39,8 @@ fun Speedometer(
     val displaySpeedMph = speedKmh * 0.621371
     val speedInt = displaySpeedMph.toInt()
 
-    // Bar reaches 100% at 30 mph (anything faster stays full)
-    val barFullAtMph = 30.0
+    // Bar reaches 100% at motorcycle max (~33 mph); anything faster stays full
+    val barFullAtMph = 33.0
     val speedFraction = (displaySpeedMph / barFullAtMph).coerceIn(0.0, 1.0).toFloat()
 
     // Bar color: cyan when within limit, warm colors when over (road sign or user limit)
