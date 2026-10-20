@@ -449,6 +449,17 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            // ===== DATA CREDITS =====
+            Text(
+                text = "Speed camera data © MapAtlas — mapatlas.eu (CC BY 4.0)\n" +
+                    "Map data © OpenStreetMap contributors (ODbL)",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 16.dp)
+            )
         }
     }
 }

@@ -53,6 +53,13 @@ class LocationRepository @Inject constructor(
 
     private var lastCameraFetchTime = 0L
     private var lastCameraFetchLocation: Location? = null
+
+    // Failure tracking: consecutive mirror failures back off exponentially instead of
+    // being swallowed until the rider happens to move past the distance gate.
+    @Volatile private var roadLimitFetchFailed = false
+    @Volatile private var roadLimitFailureCount = 0
+    @Volatile private var cameraFetchFailed = false
+    @Volatile private var cameraFailureCount = 0
     
     private val _currentHeading = MutableStateFlow(0f)
     val currentHeading: StateFlow<Float> = _currentHeading.asStateFlow() // degrees
@@ -83,6 +90,12 @@ class LocationRepository @Inject constructor(
         private const val CAMERA_FETCH_COOLDOWN_MS = 30000L     // 30 seconds
         private const val CAMERA_FETCH_MIN_DISTANCE_M = 500.0   // 500 meters
         private const val CAMERA_ALERT_RANGE_M = 100f           // Show alert within 100m
+
+        // Failed fetches (mirror down / rate-limited) retry on a timer instead of the
+        // distance gate above, otherwise a single 502 leaves the HUD blank until the next ride.
+        private const val ROAD_LIMIT_RETRY_BASE_MS = 8_000L
+        private const val CAMERA_FETCH_RETRY_BASE_MS = 15_000L
+        private const val FETCH_MAX_BACKOFF_MS = 120_000L
     }
     
     @SuppressLint("MissingPermission")
@@ -177,15 +190,34 @@ class LocationRepository @Inject constructor(
         val now = System.currentTimeMillis()
         val dt = now - lastRoadLimitFetchTime
         val dist = lastRoadLimitFetchLocation?.distanceTo(location) ?: Float.MAX_VALUE
-        
-        if (dt > ROAD_LIMIT_FETCH_COOLDOWN_MS && dist > ROAD_LIMIT_MIN_DISTANCE_M) {
-            lastRoadLimitFetchTime = now
-            lastRoadLimitFetchLocation = location
-            
-            scope.launch(Dispatchers.IO) {
-                val limit = roadSpeedRepository.fetchSpeedLimit(location.latitude, location.longitude)
-                if (limit != null) {
-                    _roadSpeedLimit.value = limit
+
+        // Successes wait for cooldown + movement; failures retry on a timer (even parked),
+        // with exponential backoff so a busy mirror is not hammered.
+        val ready = if (roadLimitFetchFailed) {
+            dt >= backoffMs(roadLimitFailureCount, ROAD_LIMIT_RETRY_BASE_MS)
+        } else {
+            dt > ROAD_LIMIT_FETCH_COOLDOWN_MS && dist > ROAD_LIMIT_MIN_DISTANCE_M
+        }
+        if (!ready) return
+
+        lastRoadLimitFetchTime = now
+        lastRoadLimitFetchLocation = location
+
+        scope.launch(Dispatchers.IO) {
+            when (val result = roadSpeedRepository.fetchSpeedLimit(location.latitude, location.longitude)) {
+                is RoadSpeedResult.Found -> {
+                    roadLimitFetchFailed = false
+                    roadLimitFailureCount = 0
+                    _roadSpeedLimit.value = result.limitKmh
+                }
+                RoadSpeedResult.NoData -> {
+                    // Valid answer, nothing mapped here — normal cooldowns, keep previous value.
+                    roadLimitFetchFailed = false
+                    roadLimitFailureCount = 0
+                }
+                RoadSpeedResult.Failed -> {
+                    roadLimitFetchFailed = true
+                    roadLimitFailureCount = (roadLimitFailureCount + 1).coerceAtMost(8)
                 }
             }
         }
@@ -196,14 +228,35 @@ class LocationRepository @Inject constructor(
         val dt = now - lastCameraFetchTime
         val dist = lastCameraFetchLocation?.distanceTo(location) ?: Float.MAX_VALUE
 
-        if (dt > CAMERA_FETCH_COOLDOWN_MS && dist > CAMERA_FETCH_MIN_DISTANCE_M) {
-            lastCameraFetchTime = now
-            lastCameraFetchLocation = location
+        val ready = if (cameraFetchFailed) {
+            dt >= backoffMs(cameraFailureCount, CAMERA_FETCH_RETRY_BASE_MS)
+        } else {
+            dt > CAMERA_FETCH_COOLDOWN_MS && dist > CAMERA_FETCH_MIN_DISTANCE_M
+        }
+        if (!ready) return
 
-            scope.launch(Dispatchers.IO) {
-                speedCameraRepository.getCamerasNear(location.latitude, location.longitude)
+        lastCameraFetchTime = now
+        lastCameraFetchLocation = location
+
+        scope.launch(Dispatchers.IO) {
+            when (speedCameraRepository.fetchCamerasNear(location.latitude, location.longitude)) {
+                is CameraFetchResult.Success -> {
+                    cameraFetchFailed = false
+                    cameraFailureCount = 0
+                }
+                CameraFetchResult.Failed -> {
+                    cameraFetchFailed = true
+                    cameraFailureCount = (cameraFailureCount + 1).coerceAtMost(8)
+                }
             }
         }
+    }
+
+    /** 8s/15s base, doubling per consecutive failure up to [FETCH_MAX_BACKOFF_MS]. */
+    private fun backoffMs(failures: Int, baseMs: Long): Long {
+        if (failures <= 0) return baseMs
+        val shift = (failures - 1).coerceAtMost(4)
+        return (baseMs shl shift).coerceAtMost(FETCH_MAX_BACKOFF_MS)
     }
 
     private fun checkCameraProximity(location: Location) {
